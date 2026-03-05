@@ -121,12 +121,12 @@ The included `gagaclaw_recommend_mcp` provides two tools:
 
 To register it in Antigravity:
 
-1. Edit `mcp_config.json` in the project root — set the absolute path to `index.js`
-2. Copy it to Antigravity's config directory:
+1. Refer to `mcp_config.json` in the project root as a template (do not edit it directly)
+2. Create the MCP config directly in Antigravity's config directory, with the absolute path to `index.js`:
    - **Windows:** `%USERPROFILE%\.gemini\antigravity\mcp_config.json`
    - **Linux/macOS:** `~/.gemini/antigravity/mcp_config.json`
 
-The IDE only reads MCP config from `~/.gemini/antigravity/` — if you change `mcp_config.json` later, copy it again.
+The IDE only reads MCP config from `~/.gemini/antigravity/` — always edit it there.
 
 ## Project Structure
 
@@ -140,7 +140,7 @@ gagaclaw/
 ├── gagaclaw.json              # Main config (not in repo, copy from example)
 ├── gagaclaw.example.json      # Config template
 ├── cronjobs.json              # Cron job definitions
-├── mcp_config.json            # MCP server paths
+├── mcp_config.json            # MCP config template (do not edit, copy to ~/.gemini/antigravity/)
 ├── package.json               # Dependencies
 ├── gagaclaw_recommend_mcp/    # MCP server (groq_transcribe + telegram_send_file)
 │   └── index.js
@@ -315,12 +315,12 @@ cp cronjobs.example.json cronjobs.json
 
 在 Antigravity 中註冊：
 
-1. 編輯專案根目錄的 `mcp_config.json` — 設定 `index.js` 的絕對路徑
-2. 複製到 Antigravity 的設定目錄：
+1. 參考專案根目錄的 `mcp_config.json` 作為範本（請勿直接編輯）
+2. 直接在 Antigravity 的設定目錄中建立 MCP 設定檔，填入 `index.js` 的絕對路徑：
    - **Windows:** `%USERPROFILE%\.gemini\antigravity\mcp_config.json`
    - **Linux/macOS:** `~/.gemini/antigravity/mcp_config.json`
 
-IDE 只會從 `~/.gemini/antigravity/` 讀取 MCP 設定 — 日後修改 `mcp_config.json` 後需重新複製。
+IDE 只會從 `~/.gemini/antigravity/` 讀取 MCP 設定 — 請一律在該位置編輯。
 
 ## 專案結構
 
@@ -334,7 +334,7 @@ gagaclaw/
 ├── gagaclaw.json              # 主設定檔（不在 repo 中，從範本複製）
 ├── gagaclaw.example.json      # 設定範本
 ├── cronjobs.json              # 排程任務定義
-├── mcp_config.json            # MCP 伺服器路徑
+├── mcp_config.json            # MCP 設定範本（勿直接編輯，複製到 ~/.gemini/antigravity/）
 ├── package.json               # 相依套件
 ├── gagaclaw_recommend_mcp/    # MCP 伺服器（groq_transcribe + telegram_send_file）
 │   └── index.js

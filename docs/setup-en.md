@@ -81,7 +81,19 @@ Read gagaclaw.json and interactively fill in each placeholder field. Ask ONE que
 After ALL fields are updated, read gagaclaw.json back and show me the result with sensitive values masked (e.g. token: "862***lqs") so I can confirm.
 
 Step 6 — Install MCP Server:
-6a. Edit the project's mcp_config.json — update the args path to the absolute path:
+The project includes mcp_config.json as a reference template. Do NOT edit it directly
+(everyone's path is different, editing it causes git conflicts).
+
+Instead, create the MCP config directly in Antigravity's config location:
+  [🪟 WINDOWS] %USERPROFILE%\.gemini\antigravity\mcp_config.json
+  [🐧 LINUX]   ~/.gemini/antigravity/mcp_config.json
+
+Create the directory if it doesn't exist:
+  [🪟 WINDOWS] mkdir -p "$USERPROFILE/.gemini/antigravity"
+  [🐧 LINUX]   mkdir -p ~/.gemini/antigravity
+
+Write this content to the file, replacing <ABSOLUTE_PATH> with the actual absolute path
+to the gagaclaw directory (e.g. /home/user/gagaclaw or C:/Users/user/gagaclaw):
   {
     "mcpServers": {
       "gagaclaw_recommend_mcp": {
@@ -90,16 +102,8 @@ Step 6 — Install MCP Server:
       }
     }
   }
-Replace <ABSOLUTE_PATH> with the actual absolute path to the gagaclaw directory.
 
-6b. Copy it to Antigravity's MCP config location so the IDE picks it up:
-  [🪟 WINDOWS] Copy mcp_config.json to: %USERPROFILE%\.gemini\antigravity\mcp_config.json
-  [🐧 LINUX]   Copy mcp_config.json to: ~/.gemini/antigravity/mcp_config.json
-  Create the directory if it doesn't exist: mkdir -p ~/.gemini/antigravity
-  Then: cp mcp_config.json ~/.gemini/antigravity/mcp_config.json
-
-Important: If you later modify mcp_config.json (add servers, change paths), you must
-copy it again to ~/.gemini/antigravity/mcp_config.json — the IDE only reads from there.
+The IDE only reads MCP config from ~/.gemini/antigravity/ — always edit it there.
 Confirm when done.
 
 Step 7 — [🐧 LINUX] Create Launch Scripts:
