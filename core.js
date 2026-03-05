@@ -312,7 +312,30 @@ async function checkPort(port, host) {
 }
 
 // ─── Auth extraction (one-time, via Puppeteer) ───────────────────────────────
-async function stealAuth(browser, page, logger) {
+
+function readAuthFromDisk(log) {
+    try {
+        const home = process.env.USERPROFILE || process.env.HOME || '';
+        const candidates = [
+            path.join(home, 'AppData/Roaming/Antigravity/User/globalStorage/state.vscdb'),
+            path.join(home, '.config/Antigravity/User/globalStorage/state.vscdb'),
+        ];
+        for (const dbPath of candidates) {
+            if (!fs.existsSync(dbPath)) continue;
+            const buf = fs.readFileSync(dbPath);
+            const text = buf.toString('latin1');
+            const apiKeyMatch = text.match(/"apiKey"\s*:\s*"(ya29\.[^"]+)"/);
+            if (apiKeyMatch) {
+                const metadata = { apiKey: apiKeyMatch[1], ideName: 'antigravity', extensionName: 'antigravity', locale: 'en', ideVersion: '1.0.0' };
+                log('info', `Auth: apiKey from disk (${dbPath.split(/[/\\]/).pop()})`);
+                return metadata;
+            }
+        }
+    } catch { }
+    return null;
+}
+
+async function captureAuth(browser, page, logger) {
     const log = logger || (() => {});
 
     let osCsrfToken = null, osLsPort = null;
@@ -332,6 +355,16 @@ async function stealAuth(browser, page, logger) {
         }
     } catch { }
 
+    // Layer 1: Read apiKey from disk (state.vscdb) + csrf from OS — instant, no waiting
+    if (osCsrfToken && osLsPort) {
+        const diskMetadata = readAuthFromDisk(log);
+        if (diskMetadata) {
+            log('info', `Auth: instant (disk + OS) · port ${osLsPort}`);
+            return { metadata: diskMetadata, csrfToken: osCsrfToken, cascadeConfig: null, lsPort: osLsPort };
+        }
+    }
+
+    // Layer 2: Scan browser globals/storage/webpack/fiber
     const fromGlobals = await page.evaluate(() => {
         const result = {};
         try {
@@ -347,7 +380,7 @@ async function stealAuth(browser, page, logger) {
                 const key = store.key(i);
                 try {
                     const val = JSON.parse(store.getItem(key) || '');
-                    if (val?.apiKey && val?.userId && !result.metadata) result.metadata = val;
+                    if (val?.apiKey && !result.metadata) result.metadata = val;
                     const csrf = val?.csrfToken || val?.['x-codeium-csrf-token'];
                     if (csrf && !result.csrfToken) result.csrfToken = csrf;
                     if (val?.cascadeConfig && !result.cascadeConfig) result.cascadeConfig = val.cascadeConfig;
@@ -359,7 +392,7 @@ async function stealAuth(browser, page, logger) {
             try {
                 const v = window[g];
                 if (!v || typeof v !== 'object') continue;
-                if (v.apiKey && v.userId && !result.metadata) result.metadata = v;
+                if (v.apiKey && !result.metadata) result.metadata = v;
                 if (v.metadata?.apiKey && !result.metadata) result.metadata = v.metadata;
                 if (v.csrfToken && !result.csrfToken) result.csrfToken = v.csrfToken;
                 if (v.cascadeConfig && !result.cascadeConfig) result.cascadeConfig = v.cascadeConfig;
@@ -370,7 +403,7 @@ async function stealAuth(browser, page, logger) {
                 try {
                     const v = window[key];
                     if (!v || typeof v !== 'object') continue;
-                    if (v.apiKey && v.userId && !result.metadata) result.metadata = v;
+                    if (v.apiKey && !result.metadata) result.metadata = v;
                     if (v.csrfToken && !result.csrfToken) result.csrfToken = v.csrfToken;
                 } catch { }
             }
@@ -378,7 +411,7 @@ async function stealAuth(browser, page, logger) {
         try {
             const scanObj = (v) => {
                 if (!v || typeof v !== 'object') return;
-                if (v.apiKey && v.userId && !result.metadata) result.metadata = v;
+                if (v.apiKey && !result.metadata) result.metadata = v;
                 if (v.metadata?.apiKey && !result.metadata) result.metadata = v.metadata;
                 const csrf = v.csrfToken || v['x-codeium-csrf-token'];
                 if (csrf && !result.csrfToken) result.csrfToken = csrf;
@@ -387,7 +420,7 @@ async function stealAuth(browser, page, logger) {
                     try {
                         const sub = v[key];
                         if (!sub || typeof sub !== 'object' || Array.isArray(sub)) continue;
-                        if (sub.apiKey && sub.userId && !result.metadata) result.metadata = sub;
+                        if (sub.apiKey && !result.metadata) result.metadata = sub;
                         const subCsrf = sub.csrfToken || sub['x-codeium-csrf-token'];
                         if (subCsrf && !result.csrfToken) result.csrfToken = subCsrf;
                         if (sub.cascadeConfig && !result.cascadeConfig) result.cascadeConfig = sub.cascadeConfig;
@@ -415,7 +448,7 @@ async function stealAuth(browser, page, logger) {
                     try {
                         for (const src of [fiber.memoizedState, fiber.memoizedState?.memoizedState, fiber.memoizedProps]) {
                             if (!src || typeof src !== 'object') continue;
-                            if (src.apiKey && src.userId && !result.metadata) result.metadata = src;
+                            if (src.apiKey && !result.metadata) result.metadata = src;
                             const csrf = src.csrfToken || src['x-codeium-csrf-token'];
                             if (csrf && !result.csrfToken) result.csrfToken = csrf;
                         }
@@ -439,7 +472,7 @@ async function stealAuth(browser, page, logger) {
         };
     }
 
-    // CDP network interception
+    // Layer 3: CDP network interception (fallback — waits for periodic traffic)
     log('debug', 'CDP interception (waiting for periodic auth traffic)...');
     const targets = await browser.targets();
     const clients = [];
@@ -909,7 +942,7 @@ async function connectAndAuth(logger) {
         throw new Error('No chat window found');
     }
 
-    const auth = await stealAuth(browser, page, log);
+    const auth = await captureAuth(browser, page, log);
 
     // Install IDE interaction interceptor (keeps browser connected)
     try {
@@ -1081,7 +1114,7 @@ module.exports = {
     // Parsing
     parseStreamFrame,
     // Auth
-    checkPort, stealAuth, connectAndAuth,
+    checkPort, captureAuth, connectAndAuth,
     // Session
     Session, createSession, createExtraSession,
     // Workspace
