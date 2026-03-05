@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gagaclaw WebUI</title>
+    <!-- Use a modern, beautiful font from Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Sidebar for Conversations/Cascades -->
+        <aside id="sidebar" class="glass-panel">
+            <header class="sidebar-header">
+                <div class="logo">
+                    <!-- Replace with SVG or actual logo -->
+                    <span class="logo-emoji">🦅</span>
+                    <h2>Gagaclaw</h2>
+                </div>
+                <button id="btn-new-chat" class="btn primary-btn">+ New Chat</button>
+            </header>
+            <div class="sidebar-content">
+                <h3>Recent Conversations</h3>
+                <ul id="cascade-list">
+                    <!-- Dynamic List items injected here by app.js -->
+                </ul>
+            </div>
+            <div class="sidebar-footer">
+                <div class="settings-group">
+                    <label>Model</label>
+                    <select id="select-model"></select>
+                </div>
+                <div class="settings-group">
+                    <label>Mode</label>
+                    <select id="select-mode"></select>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="check-agentic">
+                    <label for="check-agentic">Agentic</label>
+                </div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="check-yolo">
+                    <label for="check-yolo">YOLO (⚡)</label>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main id="chat-container">
+            <header class="chat-header glass-panel">
+                <h3 id="current-chat-title">New Conversation</h3>
+                <div class="status-indicator">
+                    <span id="connection-status" class="dot connected"></span>
+                    <span id="status-text">Connected</span>
+                </div>
+            </header>
+            
+            <div id="chat-messages" class="messages-area">
+                <!-- Chat bubbles -->
+            </div>
+
+            <div class="chat-input-area glass-panel">
+                <div class="input-wrapper">
+                    <textarea id="chat-input" placeholder="Message Antigravity..." rows="1"></textarea>
+                    <button id="btn-send" class="btn primary-btn icon-btn">
+                        <svg viewBox="0 0 24 24" fill="none" class="send-icon">
+                            <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Template for Tool Permission Modal -->
+    <div id="permission-modal" class="modal-overlay hidden">
+        <div class="modal-content glass-panel">
+            <h3 class="modal-title">⚠ Action Required</h3>
+            <p id="permission-desc" class="modal-desc"></p>
+            <div id="permission-details" class="modal-details"></div>
+            
+            <div class="modal-actions">
+                <button id="btn-perm-deny" class="btn danger-btn">Deny</button>
+                <button id="btn-perm-allow-once" class="btn secondary-btn">Allow Once</button>
+                <button id="btn-perm-allow" class="btn primary-btn">Always Allow</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script loading at the end for faster paint -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
