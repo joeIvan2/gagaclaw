@@ -1,11 +1,14 @@
 {
     "telegram": {
         "token": "PASTE_YOUR_BOT_TOKEN_HERE",
-        "allowedUsers": [0]
+        "allowedUsers": [0],
+        "adminChatId": 0
     },
     "app": {
         "name": "Antigravity",
-        "targetExecutables": ["Antigravity.exe"]
+        "targetExecutables": [
+            "Antigravity.exe"
+        ]
     },
     "activeWorkspace": "workspace",
     "yoloMode": false,
@@ -16,7 +19,9 @@
         "model": "high",
         "mode": "planning",
         "agentic": true,
-        "cdpPorts": [9229],
+        "cdpPorts": [
+            9229
+        ],
         "cdpHost": "127.0.0.1"
     }
 }

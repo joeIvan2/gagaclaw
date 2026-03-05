@@ -613,6 +613,7 @@ async function main() {
             return;
         }
         console.log(`[⏰] Sending to chat ${chatId} (model=${item.model || 'current'} mode=${item.mode || 'current'})`);
+        await tgSend(chatId, `⏰ ${escapeHtml(item.prompt)}`, 'HTML');
         processMessage(chatId, item.prompt);
     }
 
