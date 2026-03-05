@@ -16,7 +16,7 @@
         "apiKey": "PASTE_YOUR_GROQ_API_KEY_HERE"
     },
     "defaults": {
-        "model": "high",
+        "model": "MODEL_PLACEHOLDER_M37",
         "mode": "planning",
         "agentic": true,
         "cdpPorts": [

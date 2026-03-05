@@ -43,7 +43,7 @@ It intercepts Antigravity's internal communication via Chrome DevTools Protocol 
 | `activeWorkspace` | Active workspace folder name |
 | `yoloMode` | `true` = auto-approve all tool calls, `false` = ask for approval |
 | `groq.apiKey` | Groq API key for audio transcription (optional) |
-| `defaults.model` | Default model key: `flash` / `low` / `high` / `opus` / `sonnet` / `gpt` |
+| `defaults.model` | Model ID (e.g. `MODEL_PLACEHOLDER_M37`). Must use full ID, not shorthand keys. See `MODELS` in core.js for available IDs. |
 | `defaults.mode` | `planning` or `fast` |
 | `defaults.agentic` | Enable tool usage by default |
 | `defaults.cdpPorts` | Chrome DevTools Protocol ports to connect |
@@ -92,7 +92,7 @@ Example job in `cronjobs.json`:
       "model": "high",
       "mode": "fast",
       "agentic": true,
-      "notify": { "telegram": true }
+      "notify": { "telegram": 123456789 }
     }
   ]
 }
@@ -211,28 +211,41 @@ Step 2 — Initialize Config Files:
   cp .agents/rules/rules.example.md .agents/rules/rules.md
 Confirm when done.
 
-Step 3 — Language Preference:
+Step 3 — Set Default Model:
+Read core.js and find the MODELS object (near line 25). It lists all available models with their IDs.
+Ask me which model I want as default, showing the available options:
+  - MODEL_PLACEHOLDER_M18 — Gemini 3 Flash
+  - MODEL_PLACEHOLDER_M36 — Gemini 3.1 Low
+  - MODEL_PLACEHOLDER_M37 — Gemini 3.1 High (recommended)
+  - MODEL_PLACEHOLDER_M26 — Claude 4.6 Opus
+  - MODEL_PLACEHOLDER_M35 — Claude 4.6 Sonnet
+  - MODEL_OPENAI_GPT_OSS_120B_MEDIUM — GPT OSS 120B
+Update gagaclaw.json: set "defaults.model" to the chosen model ID string.
+Do NOT use shorthand keys like "high" or "flash" — use the full MODEL_... ID.
+Confirm when done.
+
+Step 4 — Language Preference:
 Ask me: "What language should I use? (e.g., English, 繁體中文, 日本語)"
 After I answer, update these files to my chosen language:
 - .agents/rules/rules.md — add "Preferred language: <language>" and translate content
 - workspace/soul.md — translate all content, keep structure
 - workspace/memory.md — set header in chosen language
 
-Step 4 — Configure gagaclaw.json:
+Step 5 — Configure gagaclaw.json:
 Read gagaclaw.json and interactively fill in each placeholder field. Ask ONE question at a time, wait for my answer, then update the file before asking the next.
 
-4a. telegram.token
+5a. telegram.token
     - Placeholder: "PASTE_YOUR_BOT_TOKEN_HERE"
     - Ask me: "Please paste your Telegram bot token. (Create a bot at @BotFather on Telegram if you don't have one)"
     - Token format example: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz
     - Write as a JSON string (with quotes)
 
-4b. telegram.allowedUsers
+5b. telegram.allowedUsers
     - Placeholder: [0]
     - Ask me: "Please enter your Telegram user ID number. (Send /start to @userinfobot on Telegram to find it)"
     - Write as a number WITHOUT quotes inside the array, e.g. [919730886]
 
-4c. groq.apiKey
+5c. groq.apiKey
     - Placeholder: "PASTE_YOUR_GROQ_API_KEY_HERE"
     - Ask me: "Please paste your Groq API key (get one free at https://console.groq.com/keys), or type 'skip' to skip."
     - If skipped, set to empty string "" (voice transcription won't work, everything else is fine)
@@ -240,7 +253,7 @@ Read gagaclaw.json and interactively fill in each placeholder field. Ask ONE que
 
 After ALL fields are updated, read gagaclaw.json back and show me the result with sensitive values masked (e.g. token: "862***lqs") so I can confirm.
 
-Step 5 — Install MCP Server:
+Step 6 — Install MCP Server:
 Register the gagaclaw_recommend_mcp MCP server in Antigravity's MCP settings.
 The config should be:
   {
@@ -254,15 +267,16 @@ The config should be:
 Replace <ABSOLUTE_PATH> with the actual absolute path to the current directory.
 Confirm when registered.
 
-Step 6 — Verify:
+Step 7 — Verify:
 Do a final check:
 - All required files exist (core.js, telegram.js, cli.js, cronjob.js, cron.js, gagaclaw.json, package.json, gagaclaw_recommend_mcp/index.js, workspace/soul.md, workspace/memory.md)
 - gagaclaw.json has non-placeholder values for telegram.token and telegram.allowedUsers
+- gagaclaw.json has a valid MODEL_... ID in defaults.model (not "high" or "flash")
 - MCP server is registered
 - node_modules exists in both root and gagaclaw_recommend_mcp/
 Report any issues found, or confirm everything is ready.
 
-Step 7 — Done:
+Step 8 — Done:
 Tell me:
   "Setup complete! Close Antigravity IDE, then use these batch files to launch:
    - start-telegram.bat → Telegram bot
@@ -323,7 +337,7 @@ Tell me:
 | `activeWorkspace` | 啟用的工作區資料夾名稱 |
 | `yoloMode` | `true` = 自動核准所有工具呼叫，`false` = 詢問後核准 |
 | `groq.apiKey` | Groq API Key，用於語音轉文字（選用） |
-| `defaults.model` | 預設模型：`flash` / `low` / `high` / `opus` / `sonnet` / `gpt` |
+| `defaults.model` | 模型 ID（例如 `MODEL_PLACEHOLDER_M37`）。必須使用完整 ID，不可使用簡寫 key。可用模型請參考 core.js 中的 `MODELS`。 |
 | `defaults.mode` | `planning` 或 `fast` |
 | `defaults.agentic` | 預設是否啟用工具使用 |
 | `defaults.cdpPorts` | Chrome DevTools Protocol 連接埠 |
@@ -372,7 +386,7 @@ cp cronjobs.example.json cronjobs.json
       "model": "high",
       "mode": "fast",
       "agentic": true,
-      "notify": { "telegram": true }
+      "notify": { "telegram": 123456789 }
     }
   ]
 }
@@ -493,28 +507,41 @@ gagaclaw/
   cp .agents/rules/rules.example.md .agents/rules/rules.md
 完成後請確認。
 
-步驟 3 — 語言偏好：
+步驟 3 — 設定預設模型：
+讀取 core.js，找到 MODELS 物件（約第 25 行），列出所有可用模型及其 ID。
+問我要使用哪個模型作為預設值，顯示以下選項：
+  - MODEL_PLACEHOLDER_M18 — Gemini 3 Flash
+  - MODEL_PLACEHOLDER_M36 — Gemini 3.1 Low
+  - MODEL_PLACEHOLDER_M37 — Gemini 3.1 High（推薦）
+  - MODEL_PLACEHOLDER_M26 — Claude 4.6 Opus
+  - MODEL_PLACEHOLDER_M35 — Claude 4.6 Sonnet
+  - MODEL_OPENAI_GPT_OSS_120B_MEDIUM — GPT OSS 120B
+更新 gagaclaw.json：將 "defaults.model" 設為選定的模型 ID 字串。
+不可使用簡寫 key（如 "high" 或 "flash"）— 必須用完整的 MODEL_... ID。
+完成後請確認。
+
+步驟 4 — 語言偏好：
 問我：「您希望使用什麼語言？（例如：English、繁體中文、日本語）」
 我回答後，將以下檔案更新為我選擇的語言：
 - .agents/rules/rules.md — 加入「Preferred language: <語言>」並翻譯內容
 - workspace/soul.md — 翻譯所有內容，保留結構
 - workspace/memory.md — 以選定語言設定標題
 
-步驟 4 — 設定 gagaclaw.json：
+步驟 5 — 設定 gagaclaw.json：
 讀取 gagaclaw.json，互動式填入每個 placeholder 欄位。一次只問一個問題，等我回答後再更新檔案，然後才問下一個。
 
-4a. telegram.token
+5a. telegram.token
     - Placeholder: "PASTE_YOUR_BOT_TOKEN_HERE"
     - 問我：「請貼上你的 Telegram Bot Token。（如果沒有，請在 Telegram 找 @BotFather 建立一個）」
     - Token 格式範例：123456789:ABCdefGHIjklMNOpqrsTUVwxyz
     - 寫入為 JSON 字串（含引號）
 
-4b. telegram.allowedUsers
+5b. telegram.allowedUsers
     - Placeholder: [0]
     - 問我：「請輸入你的 Telegram 使用者 ID 數字。（在 Telegram 傳送 /start 給 @userinfobot 即可取得）」
     - 寫入為不含引號的數字放在陣列中，例如 [919730886]
 
-4c. groq.apiKey
+5c. groq.apiKey
     - Placeholder: "PASTE_YOUR_GROQ_API_KEY_HERE"
     - 問我：「請貼上你的 Groq API Key（可在 https://console.groq.com/keys 免費取得），或輸入 'skip' 跳過。」
     - 如果跳過，設為空字串 ""（語音轉文字功能將無法使用，其他功能不受影響）
@@ -522,7 +549,7 @@ gagaclaw/
 
 所有欄位更新完成後，重新讀取 gagaclaw.json 並顯示結果，敏感資訊請遮罩顯示（例如 token: "862***lqs"），讓我確認。
 
-步驟 5 — 安裝 MCP 伺服器：
+步驟 6 — 安裝 MCP 伺服器：
 在 Antigravity 的 MCP 設定中註冊 gagaclaw_recommend_mcp MCP 伺服器。
 設定內容如下：
   {
@@ -536,15 +563,16 @@ gagaclaw/
 將 <絕對路徑> 替換為目前目錄的實際絕對路徑。
 完成後請確認。
 
-步驟 6 — 驗證：
+步驟 7 — 驗證：
 執行最終檢查：
 - 所有必要檔案都存在（core.js, telegram.js, cli.js, cronjob.js, cron.js, gagaclaw.json, package.json, gagaclaw_recommend_mcp/index.js, workspace/soul.md, workspace/memory.md）
 - gagaclaw.json 中 telegram.token 和 telegram.allowedUsers 已非 placeholder 值
+- gagaclaw.json 的 defaults.model 為有效的 MODEL_... ID（不可為 "high" 或 "flash"）
 - MCP 伺服器已註冊
 - node_modules 在根目錄和 gagaclaw_recommend_mcp/ 中都存在
 回報任何發現的問題，或確認一切就緒。
 
-步驟 7 — 完成：
+步驟 8 — 完成：
 告訴我：
   「安裝完成！請關閉 Antigravity IDE，然後使用以下 bat 檔啟動：
    - start-telegram.bat → Telegram 機器人
