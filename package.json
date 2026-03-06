@@ -3,6 +3,7 @@
   "version": "1.1.0",
   "main": "telegram.js",
   "scripts": {
+    "start:web": "node webui.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -10,6 +11,7 @@
   "license": "GPL-3.0",
   "description": "Bridge layer connecting Telegram/CLI to Antigravity IDE",
   "dependencies": {
+    "express": "^5.2.1",
     "groq-sdk": "^0.37.0",
     "puppeteer-core": "^24.37.5"
   }
