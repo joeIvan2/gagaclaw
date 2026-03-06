@@ -170,12 +170,7 @@ This project is provided **for research and educational purposes only**.
 
 ## License
 
-This project is licensed under the [GNU General Public License v3.0 (GPL-3.0)](https://www.gnu.org/licenses/gpl-3.0.html).
-
-- You are free to use, modify, and distribute this software
-- Any derivative work must also be open-sourced under the same license
-- You must retain the original copyright notice and license
-- This software comes with absolutely no warranty
+This project is licensed under the [MIT License](https://opensource.org/licenses/MIT).
 
 ---
 
@@ -364,12 +359,7 @@ gagaclaw/
 
 ## 授權條款
 
-本專案採用 [GNU 通用公共授權條款 v3.0（GPL-3.0）](https://www.gnu.org/licenses/gpl-3.0.html)。
-
-- 您可以自由使用、修改及散佈本軟體
-- 任何衍生作品必須以相同授權條款開源
-- 您必須保留原始版權聲明與授權條款
-- 本軟體完全不提供任何保證
+本專案採用 [MIT 授權條款](https://opensource.org/licenses/MIT)。
 
 ---
 
