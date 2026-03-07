@@ -844,11 +844,22 @@ class Session extends EventEmitter {
         }
 
         pktWrite(`APPROVE>>> ${JSON.stringify(interactionPayload).slice(0, 2000)}`);
-        const res = await nodePost(this.auth.lsPort, 'HandleCascadeUserInteraction', interactionPayload, this.auth.csrfToken, this.auth.cdpHost);
+        let res = await nodePost(this.auth.lsPort, 'HandleCascadeUserInteraction', interactionPayload, this.auth.csrfToken, this.auth.cdpHost);
         pktWrite(`APPROVE<<< status=${res.status} body=${res.body.slice(0, 500)}`);
+        // Retry on "not registered" — race condition: server hasn't registered the input handler yet
+        if (res.status !== 200 && res.body && res.body.includes('not registered')) {
+            for (let retry = 1; retry <= 5; retry++) {
+                const delay = retry * 500;
+                pktWrite(`APPROVE_RETRY ${retry}/5 in ${delay}ms (not registered)`);
+                await new Promise(r => setTimeout(r, delay));
+                res = await nodePost(this.auth.lsPort, 'HandleCascadeUserInteraction', interactionPayload, this.auth.csrfToken, this.auth.cdpHost);
+                pktWrite(`APPROVE<<< status=${res.status} body=${res.body.slice(0, 500)}`);
+                if (res.status === 200 || !(res.body && res.body.includes('not registered'))) break;
+            }
+        }
         if (res.status !== 200) {
             if (res.body && res.body.includes('not registered')) {
-                // Already handled by IDE — silent
+                pktWrite(`APPROVE_GIVE_UP not registered after retries`);
             } else {
                 this.emit('error', `Interaction failed (${res.status}): ${res.body.slice(0, 80)}`);
             }
