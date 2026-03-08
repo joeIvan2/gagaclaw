@@ -137,6 +137,12 @@ gagaclaw/
 ├── cli.js                     # CLI interface
 ├── cronjob.js                 # Cron scheduler
 ├── cron.js                    # Cron helper
+├── start.sh                   # Linux/macOS launch script — CLI mode
+├── start-telegram.sh          # Linux/macOS launch script — Telegram bot
+├── start-cron.sh              # Linux/macOS launch script — Cron scheduler
+├── start.bat                  # Windows launch script — CLI mode
+├── start-telegram.bat         # Windows launch script — Telegram bot
+├── start-cron.bat             # Windows launch script — Cron scheduler
 ├── gagaclaw.json              # Main config (not in repo, copy from example)
 ├── gagaclaw.example.json      # Config template
 ├── cronjobs.json              # Cron job definitions
@@ -326,6 +332,12 @@ gagaclaw/
 ├── cli.js                     # CLI 介面
 ├── cronjob.js                 # 排程執行器
 ├── cron.js                    # 排程輔助工具
+├── start.sh                   # Linux/macOS 啟動腳本 — CLI 模式
+├── start-telegram.sh          # Linux/macOS 啟動腳本 — Telegram 機器人
+├── start-cron.sh              # Linux/macOS 啟動腳本 — Cron 排程
+├── start.bat                  # Windows 啟動腳本 — CLI 模式
+├── start-telegram.bat         # Windows 啟動腳本 — Telegram 機器人
+├── start-cron.bat             # Windows 啟動腳本 — Cron 排程
 ├── gagaclaw.json              # 主設定檔（不在 repo 中，從範本複製）
 ├── gagaclaw.example.json      # 設定範本
 ├── cronjobs.json              # 排程任務定義

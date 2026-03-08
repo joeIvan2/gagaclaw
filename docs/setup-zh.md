@@ -105,7 +105,14 @@
 IDE 只會從 ~/.gemini/antigravity/ 讀取 MCP 設定 — 請一律在該位置編輯。
 完成後請確認。
 
-步驟 7 — [🐧 LINUX] 建立啟動腳本：
+步驟 7 — [🐧 LINUX] 設定啟動腳本：
+
+Repo 已內建 Linux 啟動腳本（start.sh、start-telegram.sh、start-cron.sh）。
+它們會自動偵測並啟動 Antigravity 及 CDP（若尚未執行），並支援 exit code 42 自動重啟，
+與 Windows 的 .bat 檔行為一致。
+
+首先，設為可執行：
+  chmod +x start.sh start-telegram.sh start-cron.sh
 
 有兩種部署情境，依據步驟 5d 的回答選擇對應的方案：
 
@@ -113,45 +120,9 @@ IDE 只會從 ~/.gemini/antigravity/ 讀取 MCP 設定 — 請一律在該位置
 [A] 主機模式 — Antigravity 直接安裝在 Linux 主機上
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Gagaclaw 和 Antigravity 都直接在主機上執行。
-啟動 Antigravity 的指令：
+內建的 .sh 腳本可直接使用，無需修改。
+它們會自動以下列指令啟動 Antigravity：
   antigravity --no-sandbox --remote-debugging-port=9229 &
-
-建立以下腳本：
-
-start.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 正在啟動 Antigravity..."
-      antigravity --no-sandbox --remote-debugging-port=9229 &
-      sleep 5
-  fi
-  node cli.js
-
-start-telegram.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 正在啟動 Antigravity..."
-      antigravity --no-sandbox --remote-debugging-port=9229 &
-      sleep 5
-  fi
-  echo "📱 正在啟動 Telegram Bot...（按 Ctrl+C 停止）"
-  node telegram.js
-  read -p "按 Enter 關閉..."
-
-start-cron.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 正在啟動 Antigravity..."
-      antigravity --no-sandbox --remote-debugging-port=9229 &
-      sleep 5
-  fi
-  echo "⏰ 正在啟動排程任務...（按 Ctrl+C 停止）"
-  node cron.js
-  read -p "按 Enter 關閉..."
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [B] DOCKER 模式 — Antigravity 在 Docker 容器內執行
@@ -164,88 +135,25 @@ start-cron.sh:
 重要：Docker 有兩個子選項：
 
   [B1] Gagaclaw 在容器內執行（例如從容器桌面雙擊啟動）
-       - 腳本不可使用 "docker exec" — Antigravity 和 node 可直接使用
+       - 內建的 .sh 腳本可直接使用，無需修改
+       - Antigravity 和 node 可直接使用
        - 如果你透過 VNC/遠端桌面存取，建議使用此方式
 
   [B2] Gagaclaw 在主機上執行，透過 CDP 連線到容器內的 Antigravity
        - 容器必須使用 --network=host 或開放 port 9229
-       - 腳本使用 "docker exec" 啟動 Antigravity，但在主機上執行 "node"
+       - 需修改 .sh 腳本中的 Antigravity 啟動指令改為 docker exec
 
 問我：「Gagaclaw 要在哪裡執行？(B1) 容器內  (B2) 主機上」
 
-── [B1] 容器內腳本（不使用 docker 指令）：──
+── [B1] 容器內：──
+無需修改腳本，內建的 .sh 腳本可直接使用。
 
-start.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 正在啟動 Antigravity..."
-      antigravity --no-sandbox --remote-debugging-port=9229 &
-      sleep 5
-  fi
-  node cli.js
-
-start-telegram.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 正在啟動 Antigravity..."
-      antigravity --no-sandbox --remote-debugging-port=9229 &
-      sleep 5
-  fi
-  echo "📱 正在啟動 Telegram Bot...（按 Ctrl+C 停止）"
-  node telegram.js
-  read -p "按 Enter 關閉..."
-
-start-cron.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 正在啟動 Antigravity..."
-      antigravity --no-sandbox --remote-debugging-port=9229 &
-      sleep 5
-  fi
-  echo "⏰ 正在啟動排程任務...（按 Ctrl+C 停止）"
-  node cron.js
-  read -p "按 Enter 關閉..."
-
-── [B2] 主機對容器腳本（使用 docker exec）：──
+── [B2] 主機對容器：──
+編輯每個 .sh 腳本 — 將 Antigravity 啟動行替換：
+  原本：antigravity --no-sandbox --remote-debugging-port=9229 &
+  改為：docker exec -d -u <USER> -e DISPLAY=:1 <CONTAINER> antigravity --no-sandbox --remote-debugging-port=9229
 
 將 <CONTAINER> 和 <USER> 替換為上方的回答。
-
-start.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 正在啟動容器內的 Antigravity..."
-      docker exec -d -u <USER> -e DISPLAY=:1 <CONTAINER> antigravity --no-sandbox --remote-debugging-port=9229
-      sleep 5
-  fi
-  node cli.js
-
-start-telegram.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 正在啟動容器內的 Antigravity..."
-      docker exec -d -u <USER> -e DISPLAY=:1 <CONTAINER> antigravity --no-sandbox --remote-debugging-port=9229
-      sleep 5
-  fi
-  echo "📱 正在啟動 Telegram Bot...（按 Ctrl+C 停止）"
-  node telegram.js
-  read -p "按 Enter 關閉..."
-
-start-cron.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 正在啟動容器內的 Antigravity..."
-      docker exec -d -u <USER> -e DISPLAY=:1 <CONTAINER> antigravity --no-sandbox --remote-debugging-port=9229
-      sleep 5
-  fi
-  echo "⏰ 正在啟動排程任務...（按 Ctrl+C 停止）"
-  node cron.js
-  read -p "按 Enter 關閉..."
 
 [B2] 注意：容器必須使用 --network=host，CDP port 9229 才能從主機的
 127.0.0.1:9229 存取。如果使用 bridge 網路，請將 gagaclaw.json 中的
@@ -254,10 +162,8 @@ start-cron.sh:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 以上所有情境共通事項：
-- 設定腳本為可執行：chmod +x start.sh start-telegram.sh start-cron.sh
 - 確保 /dev/shm 至少 2GB：mount -o remount,size=2G /dev/shm
 - 以非 root 身分或在 Docker 中執行時，必須加上 --no-sandbox 參數
-- Telegram 和 Cron 腳本結尾有 "read"，讓終端視窗保持開啟
 - [🐳 DOCKER] 檔案所有權：整個 gagaclaw 目錄必須屬於執行 node/Antigravity 的桌面使用者，
   否則寫入 cronjobs.json、queue/ 等檔案時會出現 EACCES 權限拒絕錯誤。
   執行：chown -R <USER>:<USER> /path/to/gagaclaw

@@ -106,7 +106,14 @@ to the gagaclaw directory (e.g. /home/user/gagaclaw or C:/Users/user/gagaclaw):
 The IDE only reads MCP config from ~/.gemini/antigravity/ — always edit it there.
 Confirm when done.
 
-Step 7 — [🐧 LINUX] Create Launch Scripts:
+Step 7 — [🐧 LINUX] Configure Launch Scripts:
+
+The repo already includes Linux launch scripts (start.sh, start-telegram.sh, start-cron.sh).
+They auto-detect and start Antigravity with CDP if not already running, and support
+restart-on-exit-code-42 just like the Windows .bat files.
+
+First, make them executable:
+  chmod +x start.sh start-telegram.sh start-cron.sh
 
 There are TWO deployment scenarios. Use the one matching the answer from Step 5d:
 
@@ -114,45 +121,9 @@ There are TWO deployment scenarios. Use the one matching the answer from Step 5d
 [A] HOST MODE — Antigravity runs natively on the Linux host
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Gagaclaw and Antigravity both run directly on the host.
-Launch Antigravity with:
+The included .sh scripts work out of the box. No modifications needed.
+They will auto-start Antigravity with:
   antigravity --no-sandbox --remote-debugging-port=9229 &
-
-Create these scripts:
-
-start.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 Starting Antigravity..."
-      antigravity --no-sandbox --remote-debugging-port=9229 &
-      sleep 5
-  fi
-  node cli.js
-
-start-telegram.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 Starting Antigravity..."
-      antigravity --no-sandbox --remote-debugging-port=9229 &
-      sleep 5
-  fi
-  echo "📱 Starting Telegram Bot... (Press Ctrl+C to stop)"
-  node telegram.js
-  read -p "Press Enter to close..."
-
-start-cron.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 Starting Antigravity..."
-      antigravity --no-sandbox --remote-debugging-port=9229 &
-      sleep 5
-  fi
-  echo "⏰ Starting Cron Scheduler... (Press Ctrl+C to stop)"
-  node cron.js
-  read -p "Press Enter to close..."
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [B] DOCKER MODE — Antigravity runs inside a Docker container
@@ -165,88 +136,25 @@ Ask me these Docker-specific questions (one at a time, wait for answers):
 Important: There are TWO sub-options for Docker:
 
   [B1] Gagaclaw runs INSIDE the container (e.g., double-click from container desktop)
-       - Scripts must NOT use "docker exec" — Antigravity and node are available directly
+       - The included .sh scripts work as-is — no modifications needed
+       - Antigravity and node are available directly inside the container
        - This is the recommended approach if you access via VNC/remote desktop
 
   [B2] Gagaclaw runs on the HOST, connecting to Antigravity in the container via CDP
        - The container must use --network=host OR expose port 9229
-       - Scripts use "docker exec" to launch Antigravity, but run "node" locally on host
+       - Modify the .sh scripts: replace the Antigravity launch line with docker exec
 
 Ask me: "Where will Gagaclaw run? (B1) Inside the container  (B2) On the host"
 
-── [B1] In-Container scripts (NO docker commands): ──
+── [B1] In-Container: ──
+No script changes needed. The included .sh scripts work as-is.
 
-start.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 Starting Antigravity..."
-      antigravity --no-sandbox --remote-debugging-port=9229 &
-      sleep 5
-  fi
-  node cli.js
-
-start-telegram.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 Starting Antigravity..."
-      antigravity --no-sandbox --remote-debugging-port=9229 &
-      sleep 5
-  fi
-  echo "📱 Starting Telegram Bot... (Press Ctrl+C to stop)"
-  node telegram.js
-  read -p "Press Enter to close..."
-
-start-cron.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 Starting Antigravity..."
-      antigravity --no-sandbox --remote-debugging-port=9229 &
-      sleep 5
-  fi
-  echo "⏰ Starting Cron Scheduler... (Press Ctrl+C to stop)"
-  node cron.js
-  read -p "Press Enter to close..."
-
-── [B2] Host-to-Container scripts (uses docker exec): ──
+── [B2] Host-to-Container: ──
+Edit each .sh script — replace the Antigravity launch line:
+  FROM:  antigravity --no-sandbox --remote-debugging-port=9229 &
+  TO:    docker exec -d -u <USER> -e DISPLAY=:1 <CONTAINER> antigravity --no-sandbox --remote-debugging-port=9229
 
 Replace <CONTAINER> and <USER> with the answers from above.
-
-start.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 Starting Antigravity in container..."
-      docker exec -d -u <USER> -e DISPLAY=:1 <CONTAINER> antigravity --no-sandbox --remote-debugging-port=9229
-      sleep 5
-  fi
-  node cli.js
-
-start-telegram.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 Starting Antigravity in container..."
-      docker exec -d -u <USER> -e DISPLAY=:1 <CONTAINER> antigravity --no-sandbox --remote-debugging-port=9229
-      sleep 5
-  fi
-  echo "📱 Starting Telegram Bot... (Press Ctrl+C to stop)"
-  node telegram.js
-  read -p "Press Enter to close..."
-
-start-cron.sh:
-  #!/bin/bash
-  cd "$(dirname "$0")"
-  if ! curl -s http://127.0.0.1:9229/json/version > /dev/null 2>&1; then
-      echo "🚀 Starting Antigravity in container..."
-      docker exec -d -u <USER> -e DISPLAY=:1 <CONTAINER> antigravity --no-sandbox --remote-debugging-port=9229
-      sleep 5
-  fi
-  echo "⏰ Starting Cron Scheduler... (Press Ctrl+C to stop)"
-  node cron.js
-  read -p "Press Enter to close..."
 
 Note for [B2]: The container must use --network=host so CDP port 9229 is accessible
 from the host at 127.0.0.1:9229. If using bridge networking, replace 127.0.0.1 in
@@ -255,10 +163,8 @@ gagaclaw.json "defaults.cdpHost" with the container's IP address.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 For ALL scenarios above:
-- Make scripts executable: chmod +x start.sh start-telegram.sh start-cron.sh
 - Ensure /dev/shm is at least 2GB: mount -o remount,size=2G /dev/shm
 - The --no-sandbox flag is required when running as non-root or in Docker
-- Telegram and Cron scripts include "read" at the end so the terminal window stays open
 - [🐳 DOCKER] File ownership: The entire gagaclaw directory must be owned by the desktop user
   who runs node/Antigravity, otherwise writing to cronjobs.json, queue/, etc. will fail with
   EACCES permission denied. Run: chown -R <USER>:<USER> /path/to/gagaclaw
