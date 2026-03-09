@@ -586,6 +586,7 @@ class Session extends EventEmitter {
         this._lastResponse = '';
         this._lastSeenToolCall = null;
         this._pendingToolCall = null;
+        this._pendingPermTimer = null;  // debounce timer for WAITING approval
         this._turnDoneTimer = null;
         this._awaitingResponse = false;
         this._stream = null;
@@ -778,7 +779,19 @@ class Session extends EventEmitter {
             };
             this._pendingToolCall = perm;
             pktWrite(`PERM_DETECT type=${info.permissionWait} stepIndex=${stepIdx} trajId=${trajId} cmd=${info.permissionCmd} path=${info.permissionPath}`);
-            this._emitPermission(perm);
+            // Debounce: wait 1s before approving — server sometimes auto-resolves WAITING
+            // If a newer WAITING arrives for the same step, reset the timer (take the last one)
+            if (this._pendingPermTimer) { clearTimeout(this._pendingPermTimer); this._pendingPermTimer = null; }
+            this._pendingPermTimer = setTimeout(() => {
+                this._pendingPermTimer = null;
+                // Only approve if this perm is still the active pending (not superseded)
+                if (this._pendingToolCall === perm) {
+                    pktWrite(`PERM_DEBOUNCE_FIRE stepIndex=${stepIdx}`);
+                    this._emitPermission(perm);
+                } else {
+                    pktWrite(`PERM_DEBOUNCE_SKIP stepIndex=${stepIdx} (superseded)`);
+                }
+            }, 1000);
             return;
             }
         }
@@ -872,10 +885,11 @@ class Session extends EventEmitter {
         let res = await nodePost(this.auth.lsPort, 'HandleCascadeUserInteraction', interactionPayload, this.auth.csrfToken, this.auth.cdpHost);
         pktWrite(`APPROVE<<< status=${res.status} body=${res.body.slice(0, 500)}`);
         // Retry on "not registered" — race condition: server hasn't registered the input handler yet
+        // Use up to 12 retries with 1s fixed delay (~12s total) to handle slow browser-action steps
         if (res.status !== 200 && res.body && res.body.includes('not registered')) {
-            for (let retry = 1; retry <= 5; retry++) {
-                const delay = retry * 500;
-                pktWrite(`APPROVE_RETRY ${retry}/5 in ${delay}ms (not registered)`);
+            for (let retry = 1; retry <= 12; retry++) {
+                const delay = 1000;
+                pktWrite(`APPROVE_RETRY ${retry}/12 in ${delay}ms (not registered)`);
                 await new Promise(r => setTimeout(r, delay));
                 res = await nodePost(this.auth.lsPort, 'HandleCascadeUserInteraction', interactionPayload, this.auth.csrfToken, this.auth.cdpHost);
                 pktWrite(`APPROVE<<< status=${res.status} body=${res.body.slice(0, 500)}`);
