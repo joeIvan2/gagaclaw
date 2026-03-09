@@ -467,6 +467,11 @@ async function main() {
         tgSendTemp(activeChatId, `⚡ YOLO: ${escapeHtml(desc)}`, HTML).catch(() => { });
     });
 
+    session.on('yoloError', (desc) => {
+        if (!activeChatId) return;
+        tgSend(activeChatId, `❌ YOLO 失敗: ${escapeHtml(desc)}`, HTML).catch(() => { });
+    });
+
     session.on('newStep', () => {
         if (!activeChatId) return;
         const st = getChat(activeChatId);
@@ -982,7 +987,9 @@ async function main() {
     }
 
     // Clear stale updates on startup
-    const init = await tgRequest('getUpdates', { offset: -1, timeout: 0 });
+    // NOTE: offset:-1 is unsupported by Telegram (returns empty); fetch all pending
+    // updates without offset so the first poll ACKs them and won't re-trigger /restart.
+    const init = await tgRequest("getUpdates", { timeout: 0 });
     if (init.ok && init.result?.length > 0) {
         updateOffset = init.result[init.result.length - 1].update_id + 1;
     }
