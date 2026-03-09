@@ -121,8 +121,8 @@ The included `gagaclaw_recommend_mcp` provides two tools:
 
 To register it in Antigravity:
 
-1. Refer to `mcp_config.json` in the project root as a template (do not edit it directly)
-2. Create the MCP config directly in Antigravity's config directory, with the absolute path to `index.js`:
+1. Copy `mcp_config.example.json` to Antigravity's config directory and rename it `mcp_config.json`
+2. Replace `<ABSOLUTE_PATH>` with the actual absolute path to the gagaclaw directory:
    - **Windows:** `%USERPROFILE%\.gemini\antigravity\mcp_config.json`
    - **Linux/macOS:** `~/.gemini/antigravity/mcp_config.json`
 
@@ -146,7 +146,7 @@ gagaclaw/
 ├── gagaclaw.json              # Main config (not in repo, copy from example)
 ├── gagaclaw.example.json      # Config template
 ├── cronjobs.json              # Cron job definitions
-├── mcp_config.json            # MCP config template (do not edit, copy to ~/.gemini/antigravity/)
+├── mcp_config.example.json    # MCP config template (copy to ~/.gemini/antigravity/mcp_config.json)
 ├── package.json               # Dependencies
 ├── gagaclaw_recommend_mcp/    # MCP server (groq_transcribe + telegram_send_file)
 │   └── index.js
@@ -316,8 +316,8 @@ cp cronjobs.example.json cronjobs.json
 
 在 Antigravity 中註冊：
 
-1. 參考專案根目錄的 `mcp_config.json` 作為範本（請勿直接編輯）
-2. 直接在 Antigravity 的設定目錄中建立 MCP 設定檔，填入 `index.js` 的絕對路徑：
+1. 將 `mcp_config.example.json` 複製到 Antigravity 的設定目錄，並改名為 `mcp_config.json`
+2. 將 `<ABSOLUTE_PATH>` 替換為 gagaclaw 目錄的實際絕對路徑：
    - **Windows:** `%USERPROFILE%\.gemini\antigravity\mcp_config.json`
    - **Linux/macOS:** `~/.gemini/antigravity/mcp_config.json`
 
@@ -341,7 +341,7 @@ gagaclaw/
 ├── gagaclaw.json              # 主設定檔（不在 repo 中，從範本複製）
 ├── gagaclaw.example.json      # 設定範本
 ├── cronjobs.json              # 排程任務定義
-├── mcp_config.json            # MCP 設定範本（勿直接編輯，複製到 ~/.gemini/antigravity/）
+├── mcp_config.example.json    # MCP 設定範本（複製到 ~/.gemini/antigravity/mcp_config.json）
 ├── package.json               # 相依套件
 ├── gagaclaw_recommend_mcp/    # MCP 伺服器（groq_transcribe + telegram_send_file）
 │   └── index.js

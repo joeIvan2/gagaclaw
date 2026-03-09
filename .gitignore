@@ -2,6 +2,7 @@ node_modules/
 *.log
 gagaclaw.json
 cronjobs.json
+mcp_config.json
 queue/
 Sent/
 toSend/

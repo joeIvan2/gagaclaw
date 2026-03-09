@@ -81,28 +81,23 @@
 所有欄位更新完成後，重新讀取 gagaclaw.json 並顯示結果，敏感資訊請遮罩顯示（例如 token: "862***lqs"），讓我確認。
 
 步驟 6 — 安裝 MCP 伺服器：
-專案內的 mcp_config.json 僅供參考，請勿直接編輯（每個人路徑不同，修改會造成 git 衝突）。
+將範本設定檔複製到 Antigravity 的設定目錄：
 
-請直接在 Antigravity 的設定目錄中建立 MCP 設定檔：
-  [🪟 WINDOWS] %USERPROFILE%\.gemini\antigravity\mcp_config.json
-  [🐧 LINUX]   ~/.gemini/antigravity/mcp_config.json
+  [🪟 WINDOWS]
+    mkdir -p "$USERPROFILE/.gemini/antigravity"
+    cp mcp_config.example.json "$USERPROFILE/.gemini/antigravity/mcp_config.json"
 
-如果目錄不存在，先建立：
-  [🪟 WINDOWS] mkdir -p "$USERPROFILE/.gemini/antigravity"
-  [🐧 LINUX]   mkdir -p ~/.gemini/antigravity
+  [🐧 LINUX]
+    mkdir -p ~/.gemini/antigravity
+    cp mcp_config.example.json ~/.gemini/antigravity/mcp_config.json
 
-將以下內容寫入該檔案，把 <絕對路徑> 替換為 gagaclaw 目錄的實際絕對路徑
-（例如 /home/user/gagaclaw 或 C:/Users/user/gagaclaw）：
-  {
-    "mcpServers": {
-      "gagaclaw_recommend_mcp": {
-        "command": "node",
-        "args": ["<絕對路徑>/gagaclaw_recommend_mcp/index.js"]
-      }
-    }
-  }
+然後打開複製過去的檔案，將 <ABSOLUTE_PATH> 替換為 gagaclaw 目錄的實際絕對路徑
+（例如 /home/user/gagaclaw 或 C:/Users/user/gagaclaw）。
+最終結果應類似：
+  "args": ["/home/user/gagaclaw/gagaclaw_recommend_mcp/index.js"]
 
-IDE 只會從 ~/.gemini/antigravity/ 讀取 MCP 設定 — 請一律在該位置編輯。
+重要：請勿編輯專案內的 mcp_config.example.json — 只編輯複製到
+~/.gemini/antigravity/ 的那份。IDE 只會從該位置讀取 MCP 設定。
 完成後請確認。
 
 步驟 7 — [🐧 LINUX] 設定啟動腳本：
