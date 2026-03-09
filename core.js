@@ -868,6 +868,8 @@ class Session extends EventEmitter {
             return;
         }
 
+        // Wait 1s before first attempt — server may not have registered the input handler yet
+        await new Promise(r => setTimeout(r, 1000));
         pktWrite(`APPROVE>>> ${JSON.stringify(interactionPayload).slice(0, 2000)}`);
         let res = await nodePost(this.auth.lsPort, 'HandleCascadeUserInteraction', interactionPayload, this.auth.csrfToken, this.auth.cdpHost);
         pktWrite(`APPROVE<<< status=${res.status} body=${res.body.slice(0, 500)}`);
