@@ -581,6 +581,7 @@ class Session extends EventEmitter {
         this._latestTrajectoryId = null;
         this._latestStepIndex = null;
         this._stepTypeMap = new Map();  // stepIndex -> stepType (persists across diffs)
+        this._stepPathMap = new Map();  // stepIndex -> permissionPath (persists across diffs)
         this._lastThinking = '';
         this._lastResponse = '';
         this._lastSeenToolCall = null;
@@ -741,9 +742,12 @@ class Session extends EventEmitter {
             this._lastSeenToolCall = tc;
             this.emit('toolCall', tc);
         }
-        // Maintain stepType map: remember stepType per stepIndex across diffs
+        // Maintain stepType/path maps: remember per stepIndex across diffs
         if (info.permStepType !== null && info.stepIndex !== null) {
             this._stepTypeMap.set(info.stepIndex, info.permStepType);
+        }
+        if (info.permissionPath && info.stepIndex !== null) {
+            this._stepPathMap.set(info.stepIndex, info.permissionPath);
         }
         // Permission: triggered by WAITING status (enumValue:9)
         // Resolve stepType from map if not in current diff (protobuf only sends changed fields)
@@ -755,13 +759,15 @@ class Session extends EventEmitter {
             } else {
             const trajId = info.trajectoryId || this._latestTrajectoryId;
             const lastTc = this._lastSeenToolCall || {};
-            // Re-resolve permissionWait using cached stepType only when walk() fell back to browser
+            // Re-resolve permissionWait using cached stepType/path only when walk() fell back to browser
+            const cachedPath = this._stepPathMap.get(stepIdx) ?? null;
             if (info.permissionWait === 'browser') {
                 if (resolvedType === 21) info.permissionWait = 'run_command';
                 else if (resolvedType === 38) info.permissionWait = 'mcp';
-                else if (info.permissionPath) info.permissionWait = 'file';
+                else if (info.permissionPath || cachedPath) info.permissionWait = 'file';
                 // else: stays 'browser'
             }
+            if (!info.permissionPath && cachedPath) info.permissionPath = cachedPath;
             const perm = {
                 type: info.permissionWait,
                 contextTool: lastTc,
