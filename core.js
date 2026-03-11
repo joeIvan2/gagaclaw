@@ -23,18 +23,18 @@ function saveConfig(cfg) {
 }
 
 const MODELS = {
-    flash:  { id: 'MODEL_PLACEHOLDER_M18', label: 'Gemini 3 Flash (M18)' },
-    low:    { id: 'MODEL_PLACEHOLDER_M36', label: 'Gemini 3.1 Low (M36)' },
-    high:   { id: 'MODEL_PLACEHOLDER_M37', label: 'Gemini 3.1 High (M37)' },
-    opus:   { id: 'MODEL_PLACEHOLDER_M26', label: 'Claude 4.6 Opus (M26)' },
+    flash: { id: 'MODEL_PLACEHOLDER_M18', label: 'Gemini 3 Flash (M18)' },
+    low: { id: 'MODEL_PLACEHOLDER_M36', label: 'Gemini 3.1 Low (M36)' },
+    high: { id: 'MODEL_PLACEHOLDER_M37', label: 'Gemini 3.1 High (M37)' },
+    opus: { id: 'MODEL_PLACEHOLDER_M26', label: 'Claude 4.6 Opus (M26)' },
     sonnet: { id: 'MODEL_PLACEHOLDER_M35', label: 'Claude 4.6 Sonnet (M35)' },
-    gpt:    { id: 'MODEL_OPENAI_GPT_OSS_120B_MEDIUM', label: 'GPT OSS 120B' },
+    gpt: { id: 'MODEL_OPENAI_GPT_OSS_120B_MEDIUM', label: 'GPT OSS 120B' },
 };
 const MODEL_BY_ID = Object.fromEntries(Object.values(MODELS).map(m => [m.id, m]));
 
 const MODES = {
     planning: { plannerMode: 'CONVERSATIONAL_PLANNER_MODE_DEFAULT', agenticMode: true, label: 'Planning (plan → execute)' },
-    fast:     { plannerMode: 'CONVERSATIONAL_PLANNER_MODE_DEFAULT', agenticMode: false, label: 'Fast (execute directly)' },
+    fast: { plannerMode: 'CONVERSATIONAL_PLANNER_MODE_DEFAULT', agenticMode: false, label: 'Fast (execute directly)' },
 };
 
 function getConfigModel() {
@@ -242,7 +242,7 @@ function walk(node, fieldStack, info) {
                     const s = JSON.stringify(d);
                     const m = s.match(/"file:\/\/\/[^"]+"/);
                     if (m) permPath = JSON.parse(m[0]);
-                } catch {}
+                } catch { }
             }
             // Extract CommandLine from f28 (RunCommandStep) → f23 (command string)
             if (d.fieldNumber === 28) {
@@ -252,11 +252,16 @@ function walk(node, fieldStack, info) {
                         const f23 = inner.find(x => x.fieldNumber === 23);
                         if (f23?.updateSingular?.stringValue) cmdLine = f23.updateSingular.stringValue;
                     }
-                } catch {}
+                } catch { }
             }
         }
         if (stepType !== null) info.permStepType = stepType;
         if (hasStatus9 && !info.permissionWait) {
+            // Use updateIndex from steps array if walk() didn't find stepIndex in metadata
+            if (info._updateIndex !== undefined && info.stepIndex === null) {
+                info.stepIndex = info._updateIndex;
+                pktWrite(`STEP_IDX_FROM_WAITING value=${info._updateIndex}`);
+            }
             // Determine interaction type: run_command and mcp by stepType, file by URI presence, else browser
             if (stepType === 21) info.permissionWait = 'run_command';        // RUN_COMMAND
             else if (stepType === 38) info.permissionWait = 'mcp';           // MCP_TOOL
@@ -287,7 +292,20 @@ function walk(node, fieldStack, info) {
         }
     }
 
+    // Handle updateRepeated with updateIndices: track which array index we're processing
+    if (node.updateRepeated?.updateValues && node.updateRepeated.updateIndices) {
+        const vals = node.updateRepeated.updateValues;
+        const idxs = node.updateRepeated.updateIndices;
+        for (let i = 0; i < vals.length; i++) {
+            const prev = info._updateIndex;
+            info._updateIndex = idxs[i];
+            walk(vals[i], newStack, info);
+            info._updateIndex = prev;
+        }
+    }
+
     for (const key of Object.keys(node)) {
+        if (key === 'updateRepeated' && node.updateRepeated?.updateIndices) continue; // already handled above
         const val = node[key];
         if (val && typeof val === 'object') walk(val, newStack, info);
     }
@@ -367,7 +385,7 @@ async function findLsHttpsPort(pid, log) {
 }
 
 async function captureAuth(browser, page, logger) {
-    const log = logger || (() => {});
+    const log = logger || (() => { });
 
     let osCsrfToken = null, osLsPort = null, osPid = null;
     try {
@@ -586,6 +604,7 @@ class Session extends EventEmitter {
         this._lastResponse = '';
         this._lastSeenToolCall = null;
         this._pendingToolCall = null;
+        this._pendingPermTimer = null;  // debounce timer for WAITING approval
         this._turnDoneTimer = null;
         this._awaitingResponse = false;
         this._stream = null;
@@ -693,7 +712,7 @@ class Session extends EventEmitter {
     // ── Stream management ──
 
     openStream() {
-        if (this._stream) { try { this._stream.abort(); } catch {} }
+        if (this._stream) { try { this._stream.abort(); } catch { } }
         this._stream = nodeStreamFetch(this.auth.lsPort, 'StreamCascadeReactiveUpdates',
             { protocolVersion: 1, id: this.cascadeId, subscriberId: 'session-' + Date.now() },
             this.auth.csrfToken,
@@ -757,29 +776,41 @@ class Session extends EventEmitter {
             if (resolvedType === null) {
                 pktWrite(`PERM_SKIP stepIndex=${stepIdx} (no stepType in diff or map — likely false positive)`);
             } else {
-            const trajId = info.trajectoryId || this._latestTrajectoryId;
-            const lastTc = this._lastSeenToolCall || {};
-            // Re-resolve permissionWait using cached stepType/path only when walk() fell back to browser
-            const cachedPath = this._stepPathMap.get(stepIdx) ?? null;
-            if (info.permissionWait === 'browser') {
-                if (resolvedType === 21) info.permissionWait = 'run_command';
-                else if (resolvedType === 38) info.permissionWait = 'mcp';
-                else if (info.permissionPath || cachedPath) info.permissionWait = 'file';
-                // else: stays 'browser'
-            }
-            if (!info.permissionPath && cachedPath) info.permissionPath = cachedPath;
-            const perm = {
-                type: info.permissionWait,
-                contextTool: lastTc,
-                permissionPath: info.permissionPath,
-                CommandLine: info.permissionCmd || lastTc.CommandLine,
-                _trajectoryId: trajId,
-                _stepIndex: stepIdx,
-            };
-            this._pendingToolCall = perm;
-            pktWrite(`PERM_DETECT type=${info.permissionWait} stepIndex=${stepIdx} trajId=${trajId} cmd=${info.permissionCmd} path=${info.permissionPath}`);
-            this._emitPermission(perm);
-            return;
+                const trajId = info.trajectoryId || this._latestTrajectoryId;
+                const lastTc = this._lastSeenToolCall || {};
+                // Re-resolve permissionWait using cached stepType/path only when walk() fell back to browser
+                const cachedPath = this._stepPathMap.get(stepIdx) ?? null;
+                if (info.permissionWait === 'browser') {
+                    if (resolvedType === 21) info.permissionWait = 'run_command';
+                    else if (resolvedType === 38) info.permissionWait = 'mcp';
+                    else if (info.permissionPath || cachedPath) info.permissionWait = 'file';
+                    // else: stays 'browser'
+                }
+                if (!info.permissionPath && cachedPath) info.permissionPath = cachedPath;
+                const perm = {
+                    type: info.permissionWait,
+                    contextTool: lastTc,
+                    permissionPath: info.permissionPath,
+                    CommandLine: info.permissionCmd || lastTc.CommandLine,
+                    _trajectoryId: trajId,
+                    _stepIndex: stepIdx,
+                };
+                this._pendingToolCall = perm;
+                pktWrite(`PERM_DETECT type=${info.permissionWait} stepIndex=${stepIdx} trajId=${trajId} cmd=${info.permissionCmd} path=${info.permissionPath}`);
+                // Debounce: wait 1s before approving — server sometimes auto-resolves WAITING
+                // If a newer WAITING arrives for the same step, reset the timer (take the last one)
+                if (this._pendingPermTimer) { clearTimeout(this._pendingPermTimer); this._pendingPermTimer = null; }
+                this._pendingPermTimer = setTimeout(() => {
+                    this._pendingPermTimer = null;
+                    // Only approve if this perm is still the active pending (not superseded)
+                    if (this._pendingToolCall === perm) {
+                        pktWrite(`PERM_DEBOUNCE_FIRE stepIndex=${stepIdx}`);
+                        this._emitPermission(perm);
+                    } else {
+                        pktWrite(`PERM_DEBOUNCE_SKIP stepIndex=${stepIdx} (superseded)`);
+                    }
+                }, 1000);
+                return;
             }
         }
         // New step → cancel turnDone debounce + reset delta tracking
@@ -826,9 +857,9 @@ class Session extends EventEmitter {
     async _autoApprove(perm) {
         const desc = perm.type === 'run_command' ? `run_command: ${perm.CommandLine || '(cmd)'}`
             : perm.type === 'file' ? `file: ${perm.permissionPath || perm.contextTool?.AbsolutePath || '(path)'}`
-            : perm.type === 'browser' ? `browser: ${perm.contextTool?.Url || '(url)'}`
-            : perm.type === 'mcp' ? `mcp: ${perm.contextTool?.toolName || '(tool)'}`
-            : `${perm.type}`;
+                : perm.type === 'browser' ? `browser: ${perm.contextTool?.Url || '(url)'}`
+                    : perm.type === 'mcp' ? `mcp: ${perm.contextTool?.toolName || '(tool)'}`
+                        : `${perm.type}`;
         this.emit('yoloApprove', desc);
         const ok = await this.approvePermission(perm, true, {
             scope: 'PERMISSION_SCOPE_CONVERSATION',
@@ -872,10 +903,11 @@ class Session extends EventEmitter {
         let res = await nodePost(this.auth.lsPort, 'HandleCascadeUserInteraction', interactionPayload, this.auth.csrfToken, this.auth.cdpHost);
         pktWrite(`APPROVE<<< status=${res.status} body=${res.body.slice(0, 500)}`);
         // Retry on "not registered" — race condition: server hasn't registered the input handler yet
+        // Use up to 12 retries with 1s fixed delay (~12s total) to handle slow browser-action steps
         if (res.status !== 200 && res.body && res.body.includes('not registered')) {
-            for (let retry = 1; retry <= 5; retry++) {
-                const delay = retry * 500;
-                pktWrite(`APPROVE_RETRY ${retry}/5 in ${delay}ms (not registered)`);
+            for (let retry = 1; retry <= 12; retry++) {
+                const delay = 1000;
+                pktWrite(`APPROVE_RETRY ${retry}/12 in ${delay}ms (not registered)`);
                 await new Promise(r => setTimeout(r, delay));
                 res = await nodePost(this.auth.lsPort, 'HandleCascadeUserInteraction', interactionPayload, this.auth.csrfToken, this.auth.cdpHost);
                 pktWrite(`APPROVE<<< status=${res.status} body=${res.body.slice(0, 500)}`);
@@ -935,14 +967,14 @@ class Session extends EventEmitter {
     }
 
     destroy() {
-        if (this._stream) { try { this._stream.abort(); } catch {} }
+        if (this._stream) { try { this._stream.abort(); } catch { } }
         if (this._turnDoneTimer) clearTimeout(this._turnDoneTimer);
     }
 }
 
 // ─── Connect & create session ────────────────────────────────────────────────
 async function connectAndAuth(logger) {
-    const log = logger || (() => {});
+    const log = logger || (() => { });
     const cfg = loadConfig();
     const cdpPorts = cfg.defaults?.cdpPorts || [9229];
     const cdpHost = cfg.defaults?.cdpHost || '127.0.0.1';
@@ -1039,7 +1071,7 @@ async function connectAndAuth(logger) {
         });
         await page.evaluate(() => {
             const origFetch = window.fetch;
-            window.fetch = async function(...args) {
+            window.fetch = async function (...args) {
                 const [url, opts] = args;
                 if (typeof url === 'string' && url.includes('HandleCascadeUserInteraction') && opts?.body) {
                     try {
@@ -1049,7 +1081,7 @@ async function connectAndAuth(logger) {
                             const json = new TextDecoder().decode(bytes.slice(5));
                             window.__onIdeInteraction(json);
                         }
-                    } catch {}
+                    } catch { }
                 }
                 return origFetch.apply(this, args);
             };
@@ -1135,7 +1167,7 @@ function switchWorkspace(name) {
         saveConfig(cfg);
 
         let content = '';
-        try { content = fs.readFileSync(RULES_PATH, 'utf8'); } catch {}
+        try { content = fs.readFileSync(RULES_PATH, 'utf8'); } catch { }
         if (/Current workspace: `[^`]+`/.test(content)) {
             content = content.replace(/Current workspace: `[^`]+`/, `Current workspace: \`${wsName}/\``);
         } else {
@@ -1191,6 +1223,86 @@ async function checkUpdate() {
     }
 }
 
+// ─── Usage / Quota fetcher ──────────────────────────────────────────────────
+/**
+ * Fetches real-time quota/usage from the local Antigravity Language Server.
+ * Uses the same technique as AntigravityQuota extension: probes GetUserStatus.
+ * Returns an object with { userTier, models } or throws on failure.
+ */
+async function getUsage(auth) {
+    // Resolve auth if not provided
+    let lsPort = auth?.lsPort;
+    let csrfToken = auth?.csrfToken;
+    let apiKey = auth?.metadata?.apiKey;
+
+    if (!lsPort || !csrfToken) {
+        // Try to find from running process
+        try {
+            const { execSync } = require('child_process');
+            const out = execSync('ps aux | grep language_server | grep -v grep', { encoding: 'utf8', timeout: 3000 });
+            const csrfMatch = out.match(/--csrf_token\s+([a-f0-9\-]{36})/i);
+            if (csrfMatch) csrfToken = csrfMatch[1];
+            const pidMatch = out.match(/\S+\s+(\d+)/);
+            if (pidMatch) {
+                const pid = pidMatch[1];
+                const ssOut = execSync(`ss -tlnp 2>/dev/null | grep 'pid=${pid}' | awk '{print $4}' | grep -oP '\\d+$'`, { encoding: 'utf8', timeout: 2000 }).trim();
+                lsPort = ssOut.split(/\s+/).find(p => p);
+            }
+        } catch { }
+    }
+
+    if (!lsPort || !csrfToken) throw new Error('Cannot find Language Server (lsPort or csrfToken missing)');
+
+    const metadata = auth?.metadata || { ideName: 'antigravity', extensionName: 'antigravity', locale: 'en', ideVersion: '1.0.0', apiKey: apiKey || '' };
+    const body = JSON.stringify({ metadata });
+
+    const data = await new Promise((resolve, reject) => {
+        const req = https.request({
+            hostname: '127.0.0.1',
+            port: lsPort,
+            path: '/exa.language_server_pb.LanguageServerService/GetUserStatus',
+            method: 'POST',
+            agent: tlsAgent,
+            headers: {
+                'content-type': 'application/json',
+                'connect-protocol-version': '1',
+                'x-codeium-csrf-token': csrfToken,
+            },
+            timeout: 8000,
+        }, res => {
+            let raw = '';
+            res.on('data', c => raw += c);
+            res.on('end', () => resolve(raw));
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('GetUserStatus timeout')); });
+        req.write(body);
+        req.end();
+    });
+
+    const parsed = JSON.parse(data);
+    const userStatus = parsed.userStatus || parsed;
+
+    // Extract tier
+    const tier = userStatus.userTier?.name || userStatus.userTier?.id || 'Unknown';
+
+    // Extract per-model quota from cascadeModelConfigData.clientModelConfigs[]
+    // Each model has: label, quotaInfo.remainingFraction (0.0–1.0), quotaInfo.resetTime
+    const models = [];
+    const clientModelConfigs = userStatus.cascadeModelConfigData?.clientModelConfigs || [];
+    for (const m of clientModelConfigs) {
+        const label = m.label || m.name || 'Unknown Model';
+        const qi = m.quotaInfo || {};
+        const remainingFraction = qi.remainingFraction !== undefined ? qi.remainingFraction : null;
+        const resetTime = qi.resetTime || null;
+        // Convert fraction to percent
+        const pct = remainingFraction !== null ? Math.round(remainingFraction * 100) : null;
+        models.push({ label, remainingFraction, pct, resetTime });
+    }
+
+    return { userTier: tier, models, raw: userStatus };
+}
+
 // ─── Exports ─────────────────────────────────────────────────────────────────
 module.exports = {
     // Config
@@ -1209,7 +1321,7 @@ module.exports = {
     // Utilities
     splitText,
     // Version
-    LOCAL_VERSION, checkUpdate,
+    LOCAL_VERSION, checkUpdate, getUsage,
     // Logging
     pktWrite,
 };

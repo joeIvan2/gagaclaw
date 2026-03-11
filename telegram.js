@@ -8,7 +8,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer-core');
-const { createSession, MODELS, MODEL_BY_ID, MODES, loadConfig, getCurrentWorkspace, listWorkspaces, switchWorkspace, splitText, LOCAL_VERSION, checkUpdate, checkPort } = require('./core');
+const { createSession, MODELS, MODEL_BY_ID, MODES, loadConfig, getCurrentWorkspace, listWorkspaces, switchWorkspace, splitText, LOCAL_VERSION, checkUpdate, checkPort, getUsage } = require('./core');
 const cron = require('./cronjob');
 
 // ─── Config ──────────────────────────────────────────────────────────────────
@@ -700,6 +700,7 @@ async function main() {
                     `/yolo [on|off] — Auto-approve`,
                     `/ws [name] — Switch workspace`,
                     `/cron — Cron job management`,
+                    `/usage — Model quota & usage`,
                     `/sync — Sync IDE to current conversation`,
                     `/restart — Warm restart`,
                     `/restart cold — Cold restart (kill app)`,
@@ -911,6 +912,36 @@ async function main() {
                     }
                 } else {
                     await tgSend(chatId, '❌ Usage: /cron · /cron on &lt;id&gt; · /cron off &lt;id&gt;', HTML);
+                }
+                return true;
+            }
+
+            case '/usage': {
+                const usageMsg = await tgSend(chatId, '⏳ Fetching quota…');
+                try {
+                    const info = await getUsage(session.auth);
+                    const lines = [`<b>📊 Antigravity Model Usage</b>\n`];
+                    lines.push(`👤 Tier: <b>${escapeHtml(info.userTier)}</b>\n`);
+                    if (info.models.length === 0) {
+                        lines.push('ℹ️ No per-model quota data available.');
+                    } else {
+                        for (const m of info.models) {
+                            const pct = m.pct !== null ? m.pct : null;
+                            const pctStr = pct !== null ? `${pct}%` : '?';
+                            const barLen = pct !== null ? Math.round(pct / 10) : 0;
+                            const bar = pct !== null ? ' [' + '█'.repeat(barLen) + '░'.repeat(10 - barLen) + ']' : '';
+                            const icon = pct === null ? '❔' : pct > 50 ? '🟢' : pct > 20 ? '🟡' : '🔴';
+                            const reset = m.resetTime ? `\n    ⏰ Reset: ${new Date(m.resetTime).toLocaleString('zh-TW')}` : '';
+                            lines.push(`${icon} <b>${escapeHtml(m.label)}</b>\n  Remaining: <code>${pctStr}</code>${bar}${reset}`);
+                        }
+                    }
+                    const reply = lines.join('\n');
+                    if (usageMsg) await tgEdit(chatId, usageMsg, reply, HTML);
+                    else await tgSend(chatId, reply, HTML);
+                } catch (e) {
+                    const err = `❌ Usage fetch failed: <code>${escapeHtml(e.message)}</code>`;
+                    if (usageMsg) await tgEdit(chatId, usageMsg, err, HTML);
+                    else await tgSend(chatId, err, HTML);
                 }
                 return true;
             }
