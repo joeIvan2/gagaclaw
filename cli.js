@@ -7,7 +7,7 @@
 const readline = require('readline');
 const fs = require('fs');
 const path = require('path');
-const { createSession, createExtraSession, MODELS, MODEL_BY_ID, MODES, loadConfig, getCurrentWorkspace, listWorkspaces, switchWorkspace, splitText, LOCAL_VERSION, checkUpdate } = require('./core');
+const { createSession, createExtraSession, MODELS, MODEL_BY_ID, MODES, loadConfig, getCurrentWorkspace, listWorkspaces, switchWorkspace, splitText, LOCAL_VERSION, checkUpdate, getUsage } = require('./core');
 const cron = require('./cronjob');
 
 // ─── Log file (cleared on each startup) ──────────────────────────────────────
@@ -461,10 +461,42 @@ async function main() {
             console.log(`  ${c.cyan}/yolo${c.reset}         Toggle auto-approve all permissions`);
             console.log(`  ${c.cyan}/ws <name>${c.reset}    Switch workspace`);
             console.log(`  ${c.cyan}/cron${c.reset}         Cron job management`);
+            console.log(`  ${c.cyan}/usage${c.reset}        Model quota & remaining usage`);
             console.log(`  ${c.cyan}/restart${c.reset}      Warm restart (re-auth, keep Antigravity)`);
             console.log(`  ${c.cyan}/restart cold${c.reset} Cold restart (kill Antigravity + re-auth)`);
             console.log(`  ${c.cyan}/help${c.reset}         Show this help`);
             console.log(`  ${c.cyan}exit${c.reset}          Quit\n`);
+            rl.prompt();
+            return;
+        }
+
+        if (userInput === '/usage') {
+            log(c.cyan, '⌛', 'Fetching quota from Language Server...');
+            try {
+                const info = await getUsage(session.auth);
+                console.log(`\n${c.cyan}${c.bold}📊 Antigravity Model Usage${c.reset}`);
+                console.log(`${c.cyan}Tier: ${c.reset}${c.bold}${info.userTier}${c.reset}\n`);
+                if (info.models.length === 0) {
+                    log(c.yellow, '⚠', 'No per-model quota data returned by server.');
+                } else {
+                    for (const m of info.models) {
+                        const pct = m.pct !== null ? m.pct : null;
+                        const pctStr = pct !== null ? `${pct}%` : '?';
+                        let bar = '';
+                        if (pct !== null) {
+                            const filled = Math.round(pct / 5);
+                            bar = ' [' + '█'.repeat(filled) + '░'.repeat(20 - filled) + ']';
+                        }
+                        const color = pct === null ? c.gray : pct < 20 ? c.red : pct < 50 ? c.yellow : c.green;
+                        const reset = m.resetTime ? `  ${c.dim}(reset: ${new Date(m.resetTime).toLocaleString()})${c.reset}` : '';
+                        console.log(`  ${color}${c.bold}${m.label}${c.reset}`);
+                        console.log(`    Remaining: ${color}${pctStr}${c.reset}${bar}${reset}`);
+                    }
+                }
+                console.log();
+            } catch (e) {
+                log(c.red, '✗', `Usage fetch failed: ${e.message}`);
+            }
             rl.prompt();
             return;
         }

@@ -142,6 +142,8 @@ function nodeStreamFetch(port, pathName, body, csrfToken, onFrame, onEnd, host) 
                 buffer = buffer.slice(5 + frameLen);
 
                 if (flags & 0x02) {
+                    // Trailer frame may contain error info — forward before ending
+                    if (payload) { pktWrite(`    S[trailer] ${payload.slice(0, 3000)}`); try { onFrame(payload); } catch {} }
                     fireEnd();
                     return;
                 }
@@ -257,6 +259,11 @@ function walk(node, fieldStack, info) {
         }
         if (stepType !== null) info.permStepType = stepType;
         if (hasStatus9 && !info.permissionWait) {
+            // Use updateIndex from steps array if walk() didn't find stepIndex in metadata
+            if (info._updateIndex !== undefined && info.stepIndex === null) {
+                info.stepIndex = info._updateIndex;
+                pktWrite(`STEP_IDX_FROM_WAITING value=${info._updateIndex}`);
+            }
             // Determine interaction type: run_command and mcp by stepType, file by URI presence, else browser
             if (stepType === 21) info.permissionWait = 'run_command';        // RUN_COMMAND
             else if (stepType === 38) info.permissionWait = 'mcp';           // MCP_TOOL
@@ -287,7 +294,20 @@ function walk(node, fieldStack, info) {
         }
     }
 
+    // Handle updateRepeated with updateIndices: track which array index we're processing
+    if (node.updateRepeated?.updateValues && node.updateRepeated.updateIndices) {
+        const vals = node.updateRepeated.updateValues;
+        const idxs = node.updateRepeated.updateIndices;
+        for (let i = 0; i < vals.length; i++) {
+            const prev = info._updateIndex;
+            info._updateIndex = idxs[i];
+            walk(vals[i], newStack, info);
+            info._updateIndex = prev;
+        }
+    }
+
     for (const key of Object.keys(node)) {
+        if (key === 'updateRepeated' && node.updateRepeated?.updateIndices) continue; // already handled above
         const val = node[key];
         if (val && typeof val === 'object') walk(val, newStack, info);
     }
@@ -586,11 +606,21 @@ class Session extends EventEmitter {
         this._lastResponse = '';
         this._lastSeenToolCall = null;
         this._pendingToolCall = null;
+        this._pendingPermTimer = null;  // debounce timer for WAITING approval
         this._turnDoneTimer = null;
         this._awaitingResponse = false;
         this._stream = null;
         this._lastServerError = '';
         this._lastServerErrorTime = 0;
+
+        // Polling fallback state (for Antigravity ≥1.20.5 where streaming is disabled)
+        this._pollingMode = false;
+        this._pollTimer = null;
+        this._pollLastNumSteps = 0;
+        this._pollLastThinkingLen = 0;
+        this._pollLastResponseLen = 0;
+        this._pollLastStatus = null;
+        this._pollIdleCount = 0;  // consecutive polls with no change
 
         this._applyModel();
         this._applyMode();
@@ -612,6 +642,7 @@ class Session extends EventEmitter {
 
     get modelLabel() { return MODEL_BY_ID[this.currentModelId]?.label || this.currentModelId; }
     get modeLabel() { return MODES[this.currentMode]?.label || this.currentMode; }
+    get isPolling() { return this._pollingMode; }
 
     setModel(key) {
         if (MODELS[key]) {
@@ -675,6 +706,11 @@ class Session extends EventEmitter {
 
     switchCascade(id) {
         this.cascadeId = id;
+        this._pollLastNumSteps = 0;
+        this._pollLastThinkingLen = 0;
+        this._pollLastResponseLen = 0;
+        this._pollLastStatus = null;
+        this._pollIdleCount = 0;
         this.openStream();
     }
 
@@ -693,11 +729,26 @@ class Session extends EventEmitter {
     // ── Stream management ──
 
     openStream() {
+        if (this._pollingMode) { this._startPolling(); return; }
         if (this._stream) { try { this._stream.abort(); } catch {} }
+        this._streamOpenedAt = Date.now();
         this._stream = nodeStreamFetch(this.auth.lsPort, 'StreamCascadeReactiveUpdates',
             { protocolVersion: 1, id: this.cascadeId, subscriberId: 'session-' + Date.now() },
             this.auth.csrfToken,
-            (frameJson) => this._handleStreamFrame(frameJson),
+            (frameJson) => {
+                // Detect "reactive state is disabled" (Antigravity ≥1.20.5)
+                try {
+                    const raw = JSON.parse(frameJson);
+                    if (raw?.error?.message?.includes('reactive state is disabled')) {
+                        pktWrite('STREAM_DISABLED — switching to polling fallback');
+                        this._pollingMode = true;
+                        if (this._stream) { try { this._stream.abort(); } catch {} this._stream = null; }
+                        this._startPolling();
+                        return;
+                    }
+                } catch {}
+                this._handleStreamFrame(frameJson);
+            },
             () => this._handleStreamEnd(),
             this.auth.cdpHost
         );
@@ -778,7 +829,17 @@ class Session extends EventEmitter {
             };
             this._pendingToolCall = perm;
             pktWrite(`PERM_DETECT type=${info.permissionWait} stepIndex=${stepIdx} trajId=${trajId} cmd=${info.permissionCmd} path=${info.permissionPath}`);
-            this._emitPermission(perm);
+            // Debounce: wait 1s before emitting — server sometimes auto-resolves WAITING
+            if (this._pendingPermTimer) { clearTimeout(this._pendingPermTimer); this._pendingPermTimer = null; }
+            this._pendingPermTimer = setTimeout(() => {
+                this._pendingPermTimer = null;
+                if (this._pendingToolCall === perm) {
+                    pktWrite(`PERM_DEBOUNCE_FIRE stepIndex=${stepIdx}`);
+                    this._emitPermission(perm);
+                } else {
+                    pktWrite(`PERM_DEBOUNCE_SKIP stepIndex=${stepIdx} (superseded)`);
+                }
+            }, 1000);
             return;
             }
         }
@@ -872,10 +933,11 @@ class Session extends EventEmitter {
         let res = await nodePost(this.auth.lsPort, 'HandleCascadeUserInteraction', interactionPayload, this.auth.csrfToken, this.auth.cdpHost);
         pktWrite(`APPROVE<<< status=${res.status} body=${res.body.slice(0, 500)}`);
         // Retry on "not registered" — race condition: server hasn't registered the input handler yet
+        // Use up to 12 retries with 1s fixed delay (~12s total) to handle slow browser-action steps
         if (res.status !== 200 && res.body && res.body.includes('not registered')) {
-            for (let retry = 1; retry <= 5; retry++) {
-                const delay = retry * 500;
-                pktWrite(`APPROVE_RETRY ${retry}/5 in ${delay}ms (not registered)`);
+            for (let retry = 1; retry <= 12; retry++) {
+                const delay = 1000;
+                pktWrite(`APPROVE_RETRY ${retry}/12 in ${delay}ms (not registered)`);
                 await new Promise(r => setTimeout(r, delay));
                 res = await nodePost(this.auth.lsPort, 'HandleCascadeUserInteraction', interactionPayload, this.auth.csrfToken, this.auth.cdpHost);
                 pktWrite(`APPROVE<<< status=${res.status} body=${res.body.slice(0, 500)}`);
@@ -894,14 +956,222 @@ class Session extends EventEmitter {
         // Reset for continued response
         this._lastThinking = '';
         this._lastResponse = '';
+        this._pollLastThinkingLen = 0;
+        this._pollLastResponseLen = 0;
+        this._pollIdleCount = 0;
         this._pendingToolCall = null;
         this.emit('permissionResolved');
         return res.status === 200;
     }
 
     _handleStreamEnd() {
+        if (this._pollingMode) return; // polling handles reconnection
+        // Detect rapid stream end (stream closed within 3s → likely streaming disabled)
+        if (this._streamOpenedAt && Date.now() - this._streamOpenedAt < 3000) {
+            this._streamQuickEndCount = (this._streamQuickEndCount || 0) + 1;
+            if (this._streamQuickEndCount >= 2) {
+                pktWrite('STREAM_DISABLED — rapid reconnection detected, switching to polling');
+                this._pollingMode = true;
+                this._stream = null;
+                this._startPolling();
+                return;
+            }
+        } else {
+            this._streamQuickEndCount = 0;
+        }
         this.emit('streamReconnect');
         this.openStream();
+    }
+
+    // ── Polling fallback (for Antigravity ≥1.20.5) ──
+
+    _startPolling() {
+        this._stopPolling();
+        pktWrite(`POLL_START cascadeId=${this.cascadeId}`);
+        // Initial poll immediately, then on interval
+        this._pollOnce();
+        this._pollTimer = setInterval(() => this._pollOnce(), this._awaitingResponse ? 500 : 3000);
+    }
+
+    _stopPolling() {
+        if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = null; }
+    }
+
+    _adjustPollRate() {
+        if (!this._pollTimer) return;
+        const interval = this._awaitingResponse ? 500 : 3000;
+        clearInterval(this._pollTimer);
+        this._pollTimer = setInterval(() => this._pollOnce(), interval);
+    }
+
+    async _pollOnce() {
+        if (!this.cascadeId) return;
+        try {
+            const res = await nodePost(this.auth.lsPort, 'GetCascadeTrajectory', { cascadeId: this.cascadeId }, this.auth.csrfToken, this.auth.cdpHost);
+            if (res.status !== 200) return;
+            const data = JSON.parse(res.body);
+            this._processPolledTrajectory(data);
+        } catch (e) {
+            pktWrite(`POLL_ERROR: ${e.message}`);
+        }
+    }
+
+    _processPolledTrajectory(data) {
+        const steps = data.trajectory?.steps || [];
+        const numSteps = steps.length;
+
+        // Detect new steps
+        if (numSteps > this._pollLastNumSteps) {
+            for (let i = this._pollLastNumSteps; i < numSteps; i++) {
+                if (i > 0) {
+                    this._lastThinking = '';
+                    this._lastResponse = '';
+                    this._pollLastThinkingLen = 0;
+                    this._pollLastResponseLen = 0;
+                    this.emit('newStep');
+                }
+            }
+            this._pollLastNumSteps = numSteps;
+            this._pollIdleCount = 0;
+        }
+
+        if (numSteps === 0) return;
+        this._latestStepIndex = numSteps - 1;
+
+        if (!this._awaitingResponse) return;
+        if (this._pendingToolCall) return;
+
+        // ── Scan ALL steps for WAITING (permission needed) — not just the last ──
+        for (let si = 0; si < numSteps; si++) {
+            const step = steps[si];
+            const stepStatus = step.status || '';
+            const stepType = step.type || '';
+            if (!stepStatus.includes('WAITING')) continue;
+
+            let permType = 'browser';
+            if (stepType.includes('RUN_COMMAND')) permType = 'run_command';
+            else if (stepType.includes('MCP')) permType = 'mcp';
+            else if (stepType.includes('CODE_ACTION') || stepType.includes('VIEW_FILE') || stepType.includes('CREATE_FILE') || stepType.includes('EDIT_FILE')) permType = 'file';
+
+            const tc = step.metadata?.toolCall;
+            let permPath = null, permCmd = null;
+            if (tc?.argumentsJson) {
+                try {
+                    const args = JSON.parse(tc.argumentsJson);
+                    permPath = args.AbsolutePath || args.DirectoryPath || args.absolutePath || null;
+                    permCmd = args.CommandLine || args.command || null;
+                } catch {}
+            }
+            if (permPath && !permPath.startsWith('file:///')) permPath = 'file:///' + permPath.replace(/\\/g, '/');
+
+            // Build contextTool from this step's toolCall
+            const ctxTool = {};
+            if (tc?.name) { ctxTool.tool = tc.name; }
+            if (tc?.argumentsJson) { try { Object.assign(ctxTool, JSON.parse(tc.argumentsJson)); } catch {} }
+
+            const trajId = data.trajectory?.trajectoryId || this._latestTrajectoryId;
+            const perm = {
+                type: permType,
+                contextTool: ctxTool,
+                permissionPath: permPath,
+                CommandLine: permCmd,
+                _trajectoryId: trajId,
+                _stepIndex: si,
+            };
+            this._pendingToolCall = perm;
+            pktWrite(`POLL_PERM type=${permType} step=${si} tool=${tc?.name || '?'} cmd=${permCmd} path=${permPath}`);
+            // Debounce: wait 1s before emitting — server sometimes auto-resolves WAITING
+            if (this._pendingPermTimer) { clearTimeout(this._pendingPermTimer); this._pendingPermTimer = null; }
+            this._pendingPermTimer = setTimeout(() => {
+                this._pendingPermTimer = null;
+                if (this._pendingToolCall === perm) {
+                    pktWrite(`PERM_DEBOUNCE_FIRE step=${si}`);
+                    this._emitPermission(perm);
+                } else {
+                    pktWrite(`PERM_DEBOUNCE_SKIP step=${si} (superseded)`);
+                }
+            }, 1000);
+            return;
+        }
+
+        // ── Find latest PLANNER_RESPONSE step for thinking/response text ──
+        let contentStep = null;
+        for (let si = numSteps - 1; si >= 0; si--) {
+            const step = steps[si];
+            if (step.plannerResponse) { contentStep = step; break; }
+        }
+
+        if (contentStep) {
+            const thinkingText = contentStep.plannerResponse.thinking || '';
+            const responseText = contentStep.plannerResponse.modifiedResponse || contentStep.plannerResponse.response || '';
+
+            if (thinkingText.length > this._pollLastThinkingLen) {
+                const delta = thinkingText.slice(this._pollLastThinkingLen);
+                this.emit('thinking', delta, thinkingText);
+                this._lastThinking = thinkingText;
+                this._pollLastThinkingLen = thinkingText.length;
+                this._pollIdleCount = 0;
+            }
+            if (responseText.length > this._pollLastResponseLen) {
+                const delta = responseText.slice(this._pollLastResponseLen);
+                this.emit('response', delta, responseText);
+                this._lastResponse = responseText;
+                this._pollLastResponseLen = responseText.length;
+                this._pollIdleCount = 0;
+            }
+        }
+
+        // ── Emit tool calls for new steps ──
+        for (let si = 0; si < numSteps; si++) {
+            const tc = steps[si].metadata?.toolCall;
+            if (!tc?.name) continue;
+            const tcKey = `${tc.name}:${si}`;
+            if (tcKey === this._lastSeenToolCall?._pollKey) continue;
+            const tcObj = { tool: tc.name, _pollKey: tcKey };
+            try { Object.assign(tcObj, JSON.parse(tc.argumentsJson || '{}')); } catch {}
+            this._lastSeenToolCall = tcObj;
+            this.emit('toolCall', tcObj);
+            this._pollIdleCount = 0;
+        }
+
+        // ── Turn done detection ──
+        const lastStepStatus = steps[numSteps - 1].status || '';
+        const runStatus = data.status || '';
+
+        // By cascade run status change
+        if (this._pollLastStatus && this._pollLastStatus !== runStatus) {
+            if (runStatus.includes('IDLE') || runStatus.includes('DONE') || runStatus.includes('COMPLETED')) {
+                if (this._awaitingResponse && !this._pendingToolCall) {
+                    if (this._turnDoneTimer) clearTimeout(this._turnDoneTimer);
+                    this._turnDoneTimer = setTimeout(() => {
+                        this._turnDoneTimer = null;
+                        if (this._awaitingResponse && !this._pendingToolCall) {
+                            this._awaitingResponse = false;
+                            this.emit('turnDone');
+                            this._adjustPollRate();
+                        }
+                    }, 2000);
+                }
+            }
+        }
+        this._pollLastStatus = runStatus;
+
+        // By idle count — no changes for several consecutive polls + last step DONE
+        if (this._awaitingResponse && !this._pendingToolCall) {
+            this._pollIdleCount++;
+            if (this._pollIdleCount >= 10 && lastStepStatus.includes('DONE')) {
+                if (!this._turnDoneTimer) {
+                    this._turnDoneTimer = setTimeout(() => {
+                        this._turnDoneTimer = null;
+                        if (this._awaitingResponse && !this._pendingToolCall) {
+                            this._awaitingResponse = false;
+                            this.emit('turnDone');
+                            this._adjustPollRate();
+                        }
+                    }, 2000);
+                }
+            }
+        }
     }
 
     // ── Send message ──
@@ -921,8 +1191,12 @@ class Session extends EventEmitter {
         }
         this._lastThinking = '';
         this._lastResponse = '';
+        this._pollLastThinkingLen = 0;
+        this._pollLastResponseLen = 0;
+        this._pollIdleCount = 0;
         this._pendingToolCall = null;
         this._awaitingResponse = true;
+        if (this._pollingMode) this._adjustPollRate();
         return true;
     }
 
@@ -936,7 +1210,9 @@ class Session extends EventEmitter {
 
     destroy() {
         if (this._stream) { try { this._stream.abort(); } catch {} }
+        this._stopPolling();
         if (this._turnDoneTimer) clearTimeout(this._turnDoneTimer);
+        if (this._pendingPermTimer) clearTimeout(this._pendingPermTimer);
     }
 }
 
@@ -1191,6 +1467,80 @@ async function checkUpdate() {
     }
 }
 
+// ─── Usage / Quota fetcher ──────────────────────────────────────────────────
+/**
+ * Fetches real-time quota/usage from the local Antigravity Language Server.
+ * Uses the same technique as AntigravityQuota extension: probes GetUserStatus.
+ * Returns an object with { userTier, models } or throws on failure.
+ */
+async function getUsage(auth) {
+    let lsPort = auth?.lsPort;
+    let csrfToken = auth?.csrfToken;
+    let apiKey = auth?.metadata?.apiKey;
+
+    if (!lsPort || !csrfToken) {
+        // Try to find from running process
+        try {
+            const out = execSync('ps aux | grep language_server | grep -v grep', { encoding: 'utf8', timeout: 3000 });
+            const csrfMatch = out.match(/--csrf_token\s+([a-f0-9\-]{36})/i);
+            if (csrfMatch) csrfToken = csrfMatch[1];
+            const pidMatch = out.match(/\S+\s+(\d+)/);
+            if (pidMatch) {
+                const pid = pidMatch[1];
+                const ssOut = execSync(`ss -tlnp 2>/dev/null | grep 'pid=${pid}' | awk '{print $4}' | grep -oP '\\d+$'`, { encoding: 'utf8', timeout: 2000 }).trim();
+                lsPort = ssOut.split(/\s+/).find(p => p);
+            }
+        } catch { }
+    }
+
+    if (!lsPort || !csrfToken) throw new Error('Cannot find Language Server (lsPort or csrfToken missing)');
+
+    const metadata = auth?.metadata || { ideName: 'antigravity', extensionName: 'antigravity', locale: 'en', ideVersion: '1.0.0', apiKey: apiKey || '' };
+    const body = JSON.stringify({ metadata });
+
+    const data = await new Promise((resolve, reject) => {
+        const req = https.request({
+            hostname: '127.0.0.1',
+            port: lsPort,
+            path: '/exa.language_server_pb.LanguageServerService/GetUserStatus',
+            method: 'POST',
+            agent: tlsAgent,
+            headers: {
+                'content-type': 'application/json',
+                'connect-protocol-version': '1',
+                'x-codeium-csrf-token': csrfToken,
+            },
+            timeout: 8000,
+        }, res => {
+            let raw = '';
+            res.on('data', c => raw += c);
+            res.on('end', () => resolve(raw));
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('GetUserStatus timeout')); });
+        req.write(body);
+        req.end();
+    });
+
+    const parsed = JSON.parse(data);
+    const userStatus = parsed.userStatus || parsed;
+
+    const tier = userStatus.userTier?.name || userStatus.userTier?.id || 'Unknown';
+
+    const models = [];
+    const clientModelConfigs = userStatus.cascadeModelConfigData?.clientModelConfigs || [];
+    for (const m of clientModelConfigs) {
+        const label = m.label || m.name || 'Unknown Model';
+        const qi = m.quotaInfo || {};
+        const remainingFraction = qi.remainingFraction !== undefined ? qi.remainingFraction : null;
+        const resetTime = qi.resetTime || null;
+        const pct = remainingFraction !== null ? Math.round(remainingFraction * 100) : null;
+        models.push({ label, remainingFraction, pct, resetTime });
+    }
+
+    return { userTier: tier, models, raw: userStatus };
+}
+
 // ─── Exports ─────────────────────────────────────────────────────────────────
 module.exports = {
     // Config
@@ -1209,7 +1559,7 @@ module.exports = {
     // Utilities
     splitText,
     // Version
-    LOCAL_VERSION, checkUpdate,
+    LOCAL_VERSION, checkUpdate, getUsage,
     // Logging
     pktWrite,
 };
