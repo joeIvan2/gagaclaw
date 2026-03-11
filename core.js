@@ -621,6 +621,7 @@ class Session extends EventEmitter {
         this._pollLastResponseLen = 0;
         this._pollLastStatus = null;
         this._pollIdleCount = 0;  // consecutive polls with no change
+        this._pollSendStepCount = 0;  // step count at send() time — ignore older steps
 
         this._applyModel();
         this._applyMode();
@@ -1041,8 +1042,8 @@ class Session extends EventEmitter {
         if (!this._awaitingResponse) return;
         if (this._pendingToolCall) return;
 
-        // ── Scan ALL steps for WAITING (permission needed) — not just the last ──
-        for (let si = 0; si < numSteps; si++) {
+        // ── Scan steps (after send point) for WAITING (permission needed) ──
+        for (let si = this._pollSendStepCount; si < numSteps; si++) {
             const step = steps[si];
             const stepStatus = step.status || '';
             const stepType = step.type || '';
@@ -1094,9 +1095,9 @@ class Session extends EventEmitter {
             return;
         }
 
-        // ── Find latest PLANNER_RESPONSE step for thinking/response text ──
+        // ── Find latest PLANNER_RESPONSE step (after send point) for thinking/response text ──
         let contentStep = null;
-        for (let si = numSteps - 1; si >= 0; si--) {
+        for (let si = numSteps - 1; si >= this._pollSendStepCount; si--) {
             const step = steps[si];
             if (step.plannerResponse) { contentStep = step; break; }
         }
@@ -1121,8 +1122,8 @@ class Session extends EventEmitter {
             }
         }
 
-        // ── Emit tool calls for new steps ──
-        for (let si = 0; si < numSteps; si++) {
+        // ── Emit tool calls for new steps (after send point) ──
+        for (let si = this._pollSendStepCount; si < numSteps; si++) {
             const tc = steps[si].metadata?.toolCall;
             if (!tc?.name) continue;
             const tcKey = `${tc.name}:${si}`;
@@ -1150,7 +1151,7 @@ class Session extends EventEmitter {
                             this.emit('turnDone');
                             this._adjustPollRate();
                         }
-                    }, 2000);
+                    }, 1000);
                 }
             }
         }
@@ -1159,7 +1160,7 @@ class Session extends EventEmitter {
         // By idle count — no changes for several consecutive polls + last step DONE
         if (this._awaitingResponse && !this._pendingToolCall) {
             this._pollIdleCount++;
-            if (this._pollIdleCount >= 10 && lastStepStatus.includes('DONE')) {
+            if (this._pollIdleCount >= 4 && lastStepStatus.includes('DONE')) {
                 if (!this._turnDoneTimer) {
                     this._turnDoneTimer = setTimeout(() => {
                         this._turnDoneTimer = null;
@@ -1168,7 +1169,7 @@ class Session extends EventEmitter {
                             this.emit('turnDone');
                             this._adjustPollRate();
                         }
-                    }, 2000);
+                    }, 1000);
                 }
             }
         }
@@ -1194,6 +1195,7 @@ class Session extends EventEmitter {
         this._pollLastThinkingLen = 0;
         this._pollLastResponseLen = 0;
         this._pollIdleCount = 0;
+        this._pollSendStepCount = this._pollLastNumSteps;  // only look at steps AFTER this point
         this._pendingToolCall = null;
         this._awaitingResponse = true;
         if (this._pollingMode) this._adjustPollRate();
