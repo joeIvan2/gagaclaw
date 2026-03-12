@@ -620,8 +620,11 @@ class Session extends EventEmitter {
         this._agentStateReconnectTimer = null;
         this._lastServerError = '';
         this._lastServerErrorTime = 0;
-        this._lastAgentMessageMetadataCount = 0;
-        this._agentMessageBaseline = 0;
+        this._lastAgentStatus = null;
+        this._lastAgentExecutableStatus = null;
+        this._lastAgentExecutorLoopStatus = null;
+        this._agentStateTurnActive = false;
+        this._lastAgentStateFrameAt = 0;
 
         // Polling fallback state (for Antigravity ≥1.20.5 where streaming is disabled)
         this._pollingMode = false;
@@ -724,9 +727,20 @@ class Session extends EventEmitter {
         this._pollLastResponseLen = 0;
         this._pollLastStatus = null;
         this._pollIdleCount = 0;
-        this._lastAgentMessageMetadataCount = 0;
-        this._agentMessageBaseline = 0;
+        this._lastAgentStatus = null;
+        this._lastAgentExecutableStatus = null;
+        this._lastAgentExecutorLoopStatus = null;
+        this._agentStateTurnActive = false;
+        this._lastAgentStateFrameAt = 0;
         this.openStream();
+    }
+
+    _isRunningRunStatus(runStatus) {
+        return !!runStatus && runStatus.includes('RUNNING');
+    }
+
+    _isIdleRunStatus(runStatus) {
+        return !!runStatus && runStatus.includes('IDLE');
     }
 
     _isTerminalRunStatus(runStatus) {
@@ -788,22 +802,42 @@ class Session extends EventEmitter {
         }
         const update = obj?.update;
         if (!update) return;
+        this._lastAgentStateFrameAt = Date.now();
 
-        const mmCount = findMessageMetadataCount(update);
-        if (mmCount === null) return;
+        const status = update.status || '';
+        const executableStatus = update.executableStatus || '';
+        const executorLoopStatus = update.executorLoopStatus || '';
+        const hasStepUpdate =
+            Array.isArray(update.mainTrajectoryUpdate?.stepsUpdate?.indices) &&
+            update.mainTrajectoryUpdate.stepsUpdate.indices.length > 0;
 
-        const prev = this._lastAgentMessageMetadataCount;
-        this._lastAgentMessageMetadataCount = mmCount;
-        pktWrite(`AGENT_STATE_MM count=${mmCount} prev=${prev} baseline=${this._agentMessageBaseline} status=${update.status || ''}`);
+        pktWrite(
+            `AGENT_STATE status=${status} exec=${executableStatus} loop=${executorLoopStatus} ` +
+            `prev=${this._lastAgentStatus || ''} active=${this._agentStateTurnActive ? 1 : 0} steps=${hasStepUpdate ? 1 : 0}`
+        );
 
-        const statusLooksTerminal =
-            this._isTerminalRunStatus(update.status || '') &&
-            this._isTerminalRunStatus(update.executableStatus || '') &&
-            this._isTerminalRunStatus(update.executorLoopStatus || '');
-
-        if (this._awaitingResponse && !this._pendingToolCall && statusLooksTerminal && mmCount > this._agentMessageBaseline) {
-            this._scheduleTurnDoneCheck(100, 'agent-state-messageMetadata');
+        if (
+            this._isRunningRunStatus(status) ||
+            this._isRunningRunStatus(executableStatus) ||
+            this._isRunningRunStatus(executorLoopStatus) ||
+            hasStepUpdate
+        ) {
+            this._agentStateTurnActive = true;
+            this._clearTurnDoneTimer();
         }
+
+        const statusLooksIdle =
+            this._isIdleRunStatus(status) &&
+            this._isTerminalRunStatus(executableStatus) &&
+            this._isTerminalRunStatus(executorLoopStatus);
+
+        if (this._awaitingResponse && !this._pendingToolCall && this._agentStateTurnActive && statusLooksIdle) {
+            this._scheduleTurnDoneCheck(100, 'agent-state-idle');
+        }
+
+        this._lastAgentStatus = status;
+        this._lastAgentExecutableStatus = executableStatus;
+        this._lastAgentExecutorLoopStatus = executorLoopStatus;
     }
 
     _handleAgentStateEnd() {
@@ -1264,19 +1298,21 @@ class Session extends EventEmitter {
         const lastStepType = lastStep.type || '';
         const runStatus = data.status || '';
         const hasNewContentSteps = numSteps > this._pollSendStepCount + 1 && !lastStepType.includes('USER_INPUT');
+        const agentStateFresh = this._lastAgentStateFrameAt && (Date.now() - this._lastAgentStateFrameAt) < 5000;
+        const allowPollingTurnDone = !agentStateFresh || !this._agentStateTurnActive;
 
         if (this._awaitingResponse && !this._pendingToolCall) {
             this._pollIdleCount++;
         }
 
-        if (hasNewContentSteps && this._pollLastStatus && this._pollLastStatus !== runStatus) {
+        if (allowPollingTurnDone && hasNewContentSteps && this._pollLastStatus && this._pollLastStatus !== runStatus) {
             if (this._isTerminalRunStatus(runStatus) && this._awaitingResponse && !this._pendingToolCall) {
                 this._scheduleTurnDoneCheck(1000, 'poll-run-status');
             }
         }
         this._pollLastStatus = runStatus;
 
-        if (this._awaitingResponse && !this._pendingToolCall) {
+        if (allowPollingTurnDone && this._awaitingResponse && !this._pendingToolCall) {
             if (this._pollIdleCount >= 6 && hasNewContentSteps && lastStepStatus.includes('DONE') && this._isTerminalRunStatus(runStatus)) {
                 this._scheduleTurnDoneCheck(1000, 'poll-idle-count');
             }
@@ -1308,7 +1344,11 @@ class Session extends EventEmitter {
         this._pollEmittedToolCalls.clear();
         this._clearTurnDoneTimer();
         this._pendingToolCall = null;
-        this._agentMessageBaseline = this._lastAgentMessageMetadataCount || 0;
+        this._lastAgentStatus = null;
+        this._lastAgentExecutableStatus = null;
+        this._lastAgentExecutorLoopStatus = null;
+        this._agentStateTurnActive = false;
+        this._lastAgentStateFrameAt = 0;
         this._awaitingResponse = true;
         if (this._pollingMode) this._adjustPollRate();
         return true;
@@ -1461,22 +1501,6 @@ async function connectAndAuth(logger) {
     return auth;
 }
 
-function findMessageMetadataCount(node) {
-    if (!node || typeof node !== 'object') return null;
-    if (Array.isArray(node)) {
-        for (const item of node) {
-            const found = findMessageMetadataCount(item);
-            if (found !== null) return found;
-        }
-        return null;
-    }
-    if (Array.isArray(node.messageMetadata)) return node.messageMetadata.length;
-    for (const key of Object.keys(node)) {
-        const found = findMessageMetadataCount(node[key]);
-        if (found !== null) return found;
-    }
-    return null;
-}
 
 // ─── High-level: create a ready-to-use session ───────────────────────────────
 // Returns { session, auth, resumed, id, title }
