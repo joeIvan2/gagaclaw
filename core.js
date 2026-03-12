@@ -804,15 +804,30 @@ class Session extends EventEmitter {
         ) {
             pktWrite('TURN_DONE_PENDING reason=agent-state-status-idle — doing final polls');
             // Agent state signals IDLE before trajectory is fully written.
-            // Retry up to 5 times (500ms apart) to capture the response text.
+            // Retry up to 8 times (600ms apart, ~5s total) to capture the response text.
             const doFinalPolls = async (attempt = 1) => {
-                try { await this._pollOnce(); } catch {}
-                if (this._lastResponse || this._lastThinking || attempt >= 5) {
-                    pktWrite(`TURN_DONE_FIRE reason=agent-state-idle attempt=${attempt} hasResp=${!!this._lastResponse} hasThink=${!!this._lastThinking}`);
+                try {
+                    const res = await nodePost(this.auth.lsPort, 'GetCascadeTrajectory', { cascadeId: this.cascadeId }, this.auth.csrfToken, this.auth.cdpHost);
+                    const data = res.status === 200 ? JSON.parse(res.body) : null;
+                    const steps = data?.trajectory?.steps || [];
+                    pktWrite(`TURN_DONE_POLL attempt=${attempt} status=${res.status} steps=${steps.length} sendStep=${this._pollSendStepCount}`);
+                    for (let si = this._pollSendStepCount; si < steps.length; si++) {
+                        const s = steps[si];
+                        const hasResp = !!(s.plannerResponse?.response || s.plannerResponse?.modifiedResponse);
+                        const hasThink = !!s.plannerResponse?.thinking;
+                        const hasNotify = !!s.notifyUser?.notificationContent;
+                        pktWrite(`  step[${si}] type=${s.type||'?'} status=${s.status||'?'} resp=${hasResp} think=${hasThink} notify=${hasNotify}`);
+                    }
+                    if (data) this._processPolledTrajectory(data);
+                } catch (e) {
+                    pktWrite(`TURN_DONE_POLL_ERR attempt=${attempt} ${e.message}`);
+                }
+                if (this._lastResponse || this._lastThinking || attempt >= 8) {
+                    pktWrite(`TURN_DONE_FIRE attempt=${attempt} hasResp=${!!this._lastResponse} hasThink=${!!this._lastThinking} respLen=${(this._lastResponse||'').length}`);
                     this._finishTurn();
                 } else {
-                    pktWrite(`TURN_DONE_RETRY attempt=${attempt} — no response yet, waiting 500ms`);
-                    setTimeout(() => doFinalPolls(attempt + 1), 500);
+                    pktWrite(`TURN_DONE_RETRY attempt=${attempt} — no response yet, waiting 600ms`);
+                    setTimeout(() => doFinalPolls(attempt + 1), 600);
                 }
             };
             doFinalPolls();
