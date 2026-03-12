@@ -171,12 +171,11 @@ function nodeStreamFetch(port, pathName, body, csrfToken, onFrame, onEnd, host) 
 function parseStreamFrame(jsonStr) {
     try {
         const obj = JSON.parse(jsonStr);
-        const info = { thinking: [], response: [], toolCalls: [], trajectoryId: null, stepIndex: null, turnDone: false, newStepStarted: false, permissionWait: null, permissionPath: null, permissionCmd: null, permStepType: null, serverError: null };
+        const info = { thinking: [], response: [], toolCalls: [], trajectoryId: null, stepIndex: null, newStepStarted: false, permissionWait: null, permissionPath: null, permissionCmd: null, permStepType: null, serverError: null };
         walk(obj, [], info);
         const diffs = obj?.diff?.fieldDiffs;
         if (diffs && diffs.length === 1 && diffs[0].fieldNumber === 8) {
             const ev = diffs[0].updateSingular?.enumValue;
-            if (ev === 1) info.turnDone = true;
             if (ev === 2) info.newStepStarted = true;
         }
         return info;
@@ -613,7 +612,6 @@ class Session extends EventEmitter {
         this._lastSeenToolCall = null;
         this._pendingToolCall = null;
         this._pendingPermTimer = null;  // debounce timer for WAITING approval
-        this._turnDoneTimer = null;
         this._awaitingResponse = false;
         this._stream = null;
         this._agentStateStream = null;
@@ -624,7 +622,6 @@ class Session extends EventEmitter {
         this._lastAgentExecutableStatus = null;
         this._lastAgentExecutorLoopStatus = null;
         this._agentStateTurnActive = false;
-        this._lastAgentStateFrameAt = 0;
 
         // Polling fallback state (for Antigravity ≥1.20.5 where streaming is disabled)
         this._pollingMode = false;
@@ -632,8 +629,6 @@ class Session extends EventEmitter {
         this._pollLastNumSteps = 0;
         this._pollLastThinkingLen = 0;
         this._pollLastResponseLen = 0;
-        this._pollLastStatus = null;
-        this._pollIdleCount = 0;  // consecutive polls with no change
         this._pollSendStepCount = 0;  // step count at send() time — ignore older steps
         this._pollApprovedSteps = new Set();  // step indices already approved — skip on next poll
         this._pollEmittedToolCalls = new Set();  // tool call keys already emitted
@@ -725,13 +720,10 @@ class Session extends EventEmitter {
         this._pollLastNumSteps = 0;
         this._pollLastThinkingLen = 0;
         this._pollLastResponseLen = 0;
-        this._pollLastStatus = null;
-        this._pollIdleCount = 0;
         this._lastAgentStatus = null;
         this._lastAgentExecutableStatus = null;
         this._lastAgentExecutorLoopStatus = null;
         this._agentStateTurnActive = false;
-        this._lastAgentStateFrameAt = 0;
         this.openStream();
     }
 
@@ -741,13 +733,6 @@ class Session extends EventEmitter {
 
     _isIdleRunStatus(runStatus) {
         return !!runStatus && runStatus.includes('IDLE');
-    }
-
-    _isTerminalRunStatus(runStatus) {
-        return !runStatus ||
-            runStatus.includes('IDLE') ||
-            runStatus.includes('DONE') ||
-            runStatus.includes('COMPLETED');
     }
 
     _finishTurn() {
@@ -760,16 +745,6 @@ class Session extends EventEmitter {
         this.emit('turnDone');
         this._adjustPollRate();
         return true;
-    }
-
-    _scheduleTurnDoneCheck(delay, reason) {
-        this._clearTurnDoneTimer();
-        this._turnDoneTimer = setTimeout(() => {
-            this._turnDoneTimer = null;
-            if (!this._awaitingResponse || this._pendingToolCall) return;
-            pktWrite(`TURN_DONE_FIRE reason=${reason}`);
-            this._finishTurn();
-        }, delay);
     }
 
     _openAgentStateStream() {
@@ -802,7 +777,6 @@ class Session extends EventEmitter {
         }
         const update = obj?.update;
         if (!update) return;
-        this._lastAgentStateFrameAt = Date.now();
 
         const status = update.status || '';
         const executableStatus = update.executableStatus || '';
@@ -816,23 +790,20 @@ class Session extends EventEmitter {
             `prev=${this._lastAgentStatus || ''} active=${this._agentStateTurnActive ? 1 : 0} steps=${hasStepUpdate ? 1 : 0}`
         );
 
-        if (
-            this._isRunningRunStatus(status) ||
-            this._isRunningRunStatus(executableStatus) ||
-            this._isRunningRunStatus(executorLoopStatus) ||
-            hasStepUpdate
-        ) {
+        const prevStatus = this._lastAgentStatus || '';
+        if (this._isRunningRunStatus(status)) {
             this._agentStateTurnActive = true;
-            this._clearTurnDoneTimer();
         }
 
-        const statusLooksIdle =
-            this._isIdleRunStatus(status) &&
-            this._isTerminalRunStatus(executableStatus) &&
-            this._isTerminalRunStatus(executorLoopStatus);
-
-        if (this._awaitingResponse && !this._pendingToolCall && this._agentStateTurnActive && statusLooksIdle) {
-            this._scheduleTurnDoneCheck(100, 'agent-state-idle');
+        if (
+            this._awaitingResponse &&
+            !this._pendingToolCall &&
+            this._agentStateTurnActive &&
+            this._isRunningRunStatus(prevStatus) &&
+            this._isIdleRunStatus(status)
+        ) {
+            pktWrite('TURN_DONE_FIRE reason=agent-state-status-idle');
+            this._finishTurn();
         }
 
         this._lastAgentStatus = status;
@@ -980,17 +951,11 @@ class Session extends EventEmitter {
             return;
             }
         }
-        // New step → cancel turnDone debounce + reset delta tracking
-        if (info.newStepStarted && this._turnDoneTimer) {
-            clearTimeout(this._turnDoneTimer);
-            this._turnDoneTimer = null;
+        // New step in the legacy stream resets per-step delta tracking.
+        if (info.newStepStarted) {
             this._lastThinking = '';
             this._lastResponse = '';
             this.emit('newStep');
-        }
-        // Turn done → 5s debounce
-        if (info.turnDone && !this._pendingToolCall && this._awaitingResponse) {
-            this._scheduleTurnDoneCheck(500, 'stream-turn-done');
         }
     }
 
@@ -1082,14 +1047,11 @@ class Session extends EventEmitter {
         // Stream mode emits per-step text, so we must clear delta tracking.
         // Polling mode emits cumulative full text across all post-send steps,
         // so clearing poll offsets here would replay earlier content.
-        if (this._pollingMode) {
-            this._pollIdleCount = 0;
-        } else {
+        if (!this._pollingMode) {
             this._lastThinking = '';
             this._lastResponse = '';
             this._pollLastThinkingLen = 0;
             this._pollLastResponseLen = 0;
-            this._pollIdleCount = 0;
         }
         this._pendingToolCall = null;
         this.emit('permissionResolved');
@@ -1136,13 +1098,6 @@ class Session extends EventEmitter {
         this._pollTimer = setInterval(() => this._pollOnce(), interval);
     }
 
-    _clearTurnDoneTimer() {
-        if (this._turnDoneTimer) {
-            clearTimeout(this._turnDoneTimer);
-            this._turnDoneTimer = null;
-        }
-    }
-
     async _pollOnce() {
         if (!this.cascadeId) return;
         try {
@@ -1161,8 +1116,6 @@ class Session extends EventEmitter {
 
         // Detect new steps
         if (numSteps > this._pollLastNumSteps) {
-            // New content arrived after a debounce was scheduled; this turn is still active.
-            this._clearTurnDoneTimer();
             for (let i = this._pollLastNumSteps; i < numSteps; i++) {
                 if (i > 0) {
                     // Polling builds cumulative full text across all post-send steps.
@@ -1172,7 +1125,6 @@ class Session extends EventEmitter {
                 }
             }
             this._pollLastNumSteps = numSteps;
-            this._pollIdleCount = 0;
         }
 
         if (numSteps === 0) return;
@@ -1262,20 +1214,16 @@ class Session extends EventEmitter {
         }
 
         if (fullThinking.length > this._pollLastThinkingLen) {
-            this._clearTurnDoneTimer();
             const delta = fullThinking.slice(this._pollLastThinkingLen);
             this.emit('thinking', delta, fullThinking);
             this._lastThinking = fullThinking;
             this._pollLastThinkingLen = fullThinking.length;
-            this._pollIdleCount = 0;
         }
         if (fullResponse.length > this._pollLastResponseLen) {
-            this._clearTurnDoneTimer();
             const delta = fullResponse.slice(this._pollLastResponseLen);
             this.emit('response', delta, fullResponse);
             this._lastResponse = fullResponse;
             this._pollLastResponseLen = fullResponse.length;
-            this._pollIdleCount = 0;
         }
 
         // ── Emit tool calls for new steps (after send point) ──
@@ -1289,33 +1237,6 @@ class Session extends EventEmitter {
             try { Object.assign(tcObj, JSON.parse(tc.argumentsJson || '{}')); } catch {}
             this._lastSeenToolCall = tcObj;
             this.emit('toolCall', tcObj);
-            this._pollIdleCount = 0;
-        }
-
-        // ── Turn done detection ──
-        const lastStep = steps[numSteps - 1];
-        const lastStepStatus = lastStep.status || '';
-        const lastStepType = lastStep.type || '';
-        const runStatus = data.status || '';
-        const hasNewContentSteps = numSteps > this._pollSendStepCount + 1 && !lastStepType.includes('USER_INPUT');
-        const agentStateFresh = this._lastAgentStateFrameAt && (Date.now() - this._lastAgentStateFrameAt) < 5000;
-        const allowPollingTurnDone = !agentStateFresh || !this._agentStateTurnActive;
-
-        if (this._awaitingResponse && !this._pendingToolCall) {
-            this._pollIdleCount++;
-        }
-
-        if (allowPollingTurnDone && hasNewContentSteps && this._pollLastStatus && this._pollLastStatus !== runStatus) {
-            if (this._isTerminalRunStatus(runStatus) && this._awaitingResponse && !this._pendingToolCall) {
-                this._scheduleTurnDoneCheck(1000, 'poll-run-status');
-            }
-        }
-        this._pollLastStatus = runStatus;
-
-        if (allowPollingTurnDone && this._awaitingResponse && !this._pendingToolCall) {
-            if (this._pollIdleCount >= 6 && hasNewContentSteps && lastStepStatus.includes('DONE') && this._isTerminalRunStatus(runStatus)) {
-                this._scheduleTurnDoneCheck(1000, 'poll-idle-count');
-            }
         }
     }
 
@@ -1338,17 +1259,14 @@ class Session extends EventEmitter {
         this._lastResponse = '';
         this._pollLastThinkingLen = 0;
         this._pollLastResponseLen = 0;
-        this._pollIdleCount = 0;
         this._pollSendStepCount = this._pollLastNumSteps;  // only look at steps AFTER this point
         this._pollApprovedSteps.clear();
         this._pollEmittedToolCalls.clear();
-        this._clearTurnDoneTimer();
         this._pendingToolCall = null;
         this._lastAgentStatus = null;
         this._lastAgentExecutableStatus = null;
         this._lastAgentExecutorLoopStatus = null;
         this._agentStateTurnActive = false;
-        this._lastAgentStateFrameAt = 0;
         this._awaitingResponse = true;
         if (this._pollingMode) this._adjustPollRate();
         return true;
@@ -1367,7 +1285,6 @@ class Session extends EventEmitter {
         if (this._agentStateStream) { try { this._agentStateStream.abort(); } catch {} }
         if (this._agentStateReconnectTimer) clearTimeout(this._agentStateReconnectTimer);
         this._stopPolling();
-        if (this._turnDoneTimer) clearTimeout(this._turnDoneTimer);
         if (this._pendingPermTimer) clearTimeout(this._pendingPermTimer);
     }
 }
