@@ -802,15 +802,20 @@ class Session extends EventEmitter {
             this._isRunningRunStatus(prevStatus) &&
             this._isIdleRunStatus(status)
         ) {
-            pktWrite('TURN_DONE_PENDING reason=agent-state-status-idle — doing final poll');
-            // Final poll to capture any remaining response text before finishing
-            this._pollOnce().then(() => {
-                pktWrite('TURN_DONE_FIRE reason=agent-state-status-idle (after final poll)');
-                this._finishTurn();
-            }).catch(() => {
-                pktWrite('TURN_DONE_FIRE reason=agent-state-status-idle (final poll failed)');
-                this._finishTurn();
-            });
+            pktWrite('TURN_DONE_PENDING reason=agent-state-status-idle — doing final polls');
+            // Agent state signals IDLE before trajectory is fully written.
+            // Retry up to 5 times (500ms apart) to capture the response text.
+            const doFinalPolls = async (attempt = 1) => {
+                try { await this._pollOnce(); } catch {}
+                if (this._lastResponse || this._lastThinking || attempt >= 5) {
+                    pktWrite(`TURN_DONE_FIRE reason=agent-state-idle attempt=${attempt} hasResp=${!!this._lastResponse} hasThink=${!!this._lastThinking}`);
+                    this._finishTurn();
+                } else {
+                    pktWrite(`TURN_DONE_RETRY attempt=${attempt} — no response yet, waiting 500ms`);
+                    setTimeout(() => doFinalPolls(attempt + 1), 500);
+                }
+            };
+            doFinalPolls();
         }
 
         this._lastAgentStatus = status;
