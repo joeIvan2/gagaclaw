@@ -729,8 +729,7 @@ async function main() {
             case '/new': {
                 const newId = await session.startNewCascade();
                 if (newId) {
-                    session.cascadeId = newId;
-                    session.openStream();
+                    session.switchCascade(newId);
                     await tgSend(chatId, `✅ New conversation: ${newId.substring(0, 8)}...`);
                 } else {
                     await tgSend(chatId, '❌ Failed to create conversation');

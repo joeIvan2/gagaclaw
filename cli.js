@@ -255,8 +255,7 @@ async function main() {
         if (userInput === '/new') {
             const newId = await session.startNewCascade();
             if (newId) {
-                session.cascadeId = newId;
-                session.openStream();
+                session.switchCascade(newId);
                 log(c.green, '✓', `New cascade: ${newId.substring(0, 8)}...`);
             } else {
                 log(c.red, '✗', 'Failed to start new cascade');

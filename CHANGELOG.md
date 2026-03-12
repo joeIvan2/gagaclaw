@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.3.2 (2026-03-13)
+
+### Bug Fixes
+- **`/new` cascade switch state leak**: `telegram.js` and `cli.js` now use `switchCascade(newId)` instead of manually setting `cascadeId` and reopening the stream, so polling state resets correctly and new-conversation steps are no longer skipped.
+
 ## v1.3.1 (2026-03-12)
 
 ### Bug Fixes
