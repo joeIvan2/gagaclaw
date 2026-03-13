@@ -29,6 +29,9 @@
                 "adminChatId": 0
             },
             "activeWorkspace": "workspace",
+            "defaults": {
+                "cdpPorts": [9229]
+            },
             "bootstrapPrompt": "You are the `telegram-agent` instance. Use `workspace` as the primary workspace for this conversation.",
             "messageHeader": "[instance=telegram-agent workspace=workspace]"
         },
@@ -48,8 +51,19 @@
                 "adminChannelId": "PASTE_RESEARCH_ADMIN_CHANNEL_ID_HERE"
             },
             "activeWorkspace": "workspace-discord-bot",
+            "defaults": {
+                "cdpPorts": [9229]
+            },
             "bootstrapPrompt": "You are the `discord-bot` instance. Use `workspace-discord-bot` as the primary workspace for this conversation.",
             "messageHeader": "[instance=discord-bot workspace=workspace-discord-bot]"
+        },
+        "cli": {
+            "activeWorkspace": "workspace",
+            "defaults": {
+                "cdpPorts": [9229]
+            },
+            "bootstrapPrompt": "You are the `cli` instance. Use `workspace` as the primary workspace for this conversation.",
+            "messageHeader": "[instance=cli workspace=workspace]"
         }
     }
 }

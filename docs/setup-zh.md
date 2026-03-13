@@ -26,9 +26,17 @@
 步驟 2 — 初始化設定檔：
   cp gagaclaw.example.json gagaclaw.json
   cp cronjobs.example.json cronjobs.json
+
+為每個 instance 建立工作區資料夾並複製範本檔案：
+  mkdir -p workspace workspace-discord-bot
   cp workspace/soul.example.md workspace/soul.md
   cp workspace/memory.example.md workspace/memory.md
-  cp .agents/rules/rules.example.md .agents/rules/rules.md
+  cp workspace-discord-bot/soul.example.md workspace-discord-bot/soul.md
+  cp workspace-discord-bot/memory.example.md workspace-discord-bot/memory.md
+
+每個 instance 使用自己的工作區資料夾，各自擁有 soul.md 和 memory.md。
+如果之後新增更多 instance，請為每個 instance 建立對應的工作區資料夾，
+並放入 soul.md 和 memory.md。
 完成後請確認。
 
 步驟 3 — 設定預設模型：
@@ -47,9 +55,10 @@
 步驟 4 — 語言偏好：
 問我：「您希望使用什麼語言？（例如：English、繁體中文、日本語）」
 我回答後，將以下檔案更新為我選擇的語言：
-- .agents/rules/rules.md — 加入「Preferred language: <語言>」並翻譯內容
-- workspace/soul.md — 翻譯所有內容，保留結構
+- workspace/soul.md — 翻譯所有內容，保留結構，設定「Preferred language: <語言>」
 - workspace/memory.md — 以選定語言設定標題
+- workspace-discord-bot/soul.md — 同上
+- workspace-discord-bot/memory.md — 同上
 
 步驟 5 — 設定 gagaclaw.json：
 讀取 gagaclaw.json，互動式填入每個 placeholder 欄位。一次只問一個問題，等我回答後再更新檔案，然後才問下一個。
@@ -168,7 +177,7 @@ Repo 已內建 Linux 啟動腳本（start.sh、start-telegram.sh、start-cron.sh
 
 步驟 8 — 驗證：
 執行最終檢查：
-- 所有必要檔案都存在（core.js, telegram.js, cli.js, cronjob.js, cron.js, gagaclaw.json, package.json, gagaclaw_recommend_mcp/index.js, workspace/soul.md, workspace/memory.md）
+- 所有必要檔案都存在（core.js, telegram.js, cli.js, cronjob.js, cron.js, gagaclaw.json, package.json, gagaclaw_recommend_mcp/index.js, workspace/soul.md, workspace/memory.md, workspace-discord-bot/soul.md, workspace-discord-bot/memory.md）
 - gagaclaw.json 中 telegram.token 和 telegram.allowedUsers 已非 placeholder 值
 - gagaclaw.json 的 defaults.model 為有效的 MODEL_... ID（不可為 "high" 或 "flash"）
 - MCP 伺服器已註冊
@@ -184,15 +193,17 @@ Repo 已內建 Linux 啟動腳本（start.sh、start-telegram.sh、start-cron.sh
 
 [🪟 WINDOWS] 告訴我：
   「安裝完成！請關閉 Antigravity IDE，然後使用以下 bat 檔啟動：
-   - start-telegram.bat → Telegram 機器人
+   - start-telegram.bat → Telegram 機器人（telegram-agent instance）
+   - start-discord.bat → Discord 機器人（discord-bot instance）
    - start.bat → CLI 模式
    - start-cron.bat → 排程任務（在另一個終端機視窗執行）
    重要：請務必使用 .bat 檔啟動 — 它們會啟用除錯連接埠並支援重啟功能。」
 
 [🐧 LINUX] 告訴我：
   「安裝完成！使用以下 shell 腳本啟動（雙擊或在終端機執行）：
+   - start-telegram.sh → Telegram 機器人（telegram-agent instance）
+   - start-discord.sh → Discord 機器人（discord-bot instance）
    - start.sh → CLI 模式
-   - start-telegram.sh → Telegram 機器人
    - start-cron.sh → 排程任務
 
    每個腳本會自動啟動 Antigravity 及 CDP（如果尚未執行）。

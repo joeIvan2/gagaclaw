@@ -74,7 +74,7 @@ Multi-instance config is supported via `instances`. This is the recommended way 
       "activeWorkspace": "workspace-discord-bot",
       "messageHeader": "[instance=discord-bot workspace=workspace-discord-bot]",
       "bootstrapPrompt": "You are the `discord-bot` instance. Use `workspace-discord-bot` as the primary workspace for this conversation.",
-      "defaults": { "cdpPorts": [9230] }
+      "defaults": { "cdpPorts": [9229] }
     }
   }
 }
@@ -343,7 +343,7 @@ This project is licensed under the [MIT License](https://opensource.org/licenses
       "activeWorkspace": "workspace-discord-bot",
       "messageHeader": "[instance=discord-bot workspace=workspace-discord-bot]",
       "bootstrapPrompt": "你現在是 `discord-bot` instance。這個對話的主要工作區是 `workspace-discord-bot`。",
-      "defaults": { "cdpPorts": [9230] }
+      "defaults": { "cdpPorts": [9229] }
     }
   }
 }

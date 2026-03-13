@@ -26,9 +26,17 @@ Confirm when done.
 Step 2 — Initialize Config Files:
   cp gagaclaw.example.json gagaclaw.json
   cp cronjobs.example.json cronjobs.json
+
+Create workspace directories and copy template files for each instance:
+  mkdir -p workspace workspace-discord-bot
   cp workspace/soul.example.md workspace/soul.md
   cp workspace/memory.example.md workspace/memory.md
-  cp .agents/rules/rules.example.md .agents/rules/rules.md
+  cp workspace-discord-bot/soul.example.md workspace-discord-bot/soul.md
+  cp workspace-discord-bot/memory.example.md workspace-discord-bot/memory.md
+
+Each instance uses its own workspace folder with its own soul.md and memory.md.
+If the user adds more instances later, they should create a corresponding workspace folder
+with soul.md and memory.md for each one.
 Confirm when done.
 
 Step 3 — Set Default Model:
@@ -47,9 +55,10 @@ Confirm when done.
 Step 4 — Language Preference:
 Ask me: "What language should I use? (e.g., English, 繁體中文, 日本語)"
 After I answer, update these files to my chosen language:
-- .agents/rules/rules.md — add "Preferred language: <language>" and translate content
-- workspace/soul.md — translate all content, keep structure
+- workspace/soul.md — translate all content, keep structure, set "Preferred language: <language>"
 - workspace/memory.md — set header in chosen language
+- workspace-discord-bot/soul.md — same as above
+- workspace-discord-bot/memory.md — same as above
 
 Step 5 — Configure gagaclaw.json:
 Read gagaclaw.json and interactively fill in each placeholder field. Ask ONE question at a time, wait for my answer, then update the file before asking the next.
@@ -169,7 +178,7 @@ For ALL scenarios above:
 
 Step 8 — Verify:
 Do a final check:
-- All required files exist (core.js, telegram.js, cli.js, cronjob.js, cron.js, gagaclaw.json, package.json, gagaclaw_recommend_mcp/index.js, workspace/soul.md, workspace/memory.md)
+- All required files exist (core.js, telegram.js, cli.js, cronjob.js, cron.js, gagaclaw.json, package.json, gagaclaw_recommend_mcp/index.js, workspace/soul.md, workspace/memory.md, workspace-discord-bot/soul.md, workspace-discord-bot/memory.md)
 - gagaclaw.json has non-placeholder values for telegram.token and telegram.allowedUsers
 - gagaclaw.json has a valid MODEL_... ID in defaults.model (not "high" or "flash")
 - MCP server is registered
@@ -185,15 +194,17 @@ Step 9 — Done:
 
 [🪟 WINDOWS] Tell me:
   "Setup complete! Close Antigravity IDE, then use these batch files to launch:
-   - start-telegram.bat → Telegram bot
+   - start-telegram.bat → Telegram bot (telegram-agent instance)
+   - start-discord.bat → Discord bot (discord-bot instance)
    - start.bat → CLI mode
    - start-cron.bat → Cron scheduler (run in separate terminal)
    Important: Always use the .bat files to launch — they enable the debug port and restart support."
 
 [🐧 LINUX] Tell me:
   "Setup complete! Use these shell scripts to launch (double-click or run from terminal):
+   - start-telegram.sh → Telegram bot (telegram-agent instance)
+   - start-discord.sh → Discord bot (discord-bot instance)
    - start.sh → CLI mode
-   - start-telegram.sh → Telegram bot
    - start-cron.sh → Cron scheduler
 
    Each script will automatically start Antigravity with CDP if it's not already running.
