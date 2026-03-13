@@ -513,12 +513,8 @@ async function main() {
         });
 
         session.on('toolCall', (tc) => {
-            if (tc.toolName === 'notify_user' && tc.Message) {
-                if (state.responseText) state.responseText += '\n\n';
-                state.responseText += tc.Message;
-                scheduleResponseEdit(state);
-                return;
-            }
+            // notify_user is already merged into response by core.js — skip here to avoid duplication
+            if (tc.toolName === 'notify_user') return;
             sendTemp(state.channelId, formatToolCall(tc)).catch(() => {});
         });
 

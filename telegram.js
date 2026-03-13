@@ -145,7 +145,11 @@ async function tgEdit(chatId, msgId, text, opts = {}) {
     const safeText = String(text || '(empty)').slice(0, 4000);
     flog(`TG_EDIT chat=${chatId} msgId=${msgId} len=${safeText.length} text=${safeText.slice(0, 200)}`);
     const r = await tgRequest('editMessageText', { chat_id: chatId, message_id: msgId, text: safeText, ...opts });
-    if (!r.ok) flog(`[tgEdit] FAIL msgId=${msgId} len=${safeText.length} err=${r.description || JSON.stringify(r).slice(0, 200)}`);
+    if (!r.ok) {
+        // "message is not modified" means content is already correct — treat as success
+        if (r.description && r.description.includes('message is not modified')) return true;
+        flog(`[tgEdit] FAIL msgId=${msgId} len=${safeText.length} err=${r.description || JSON.stringify(r).slice(0, 200)}`);
+    }
     return r.ok;
 }
 
@@ -442,14 +446,8 @@ async function main() {
 
     session.on('toolCall', (tc) => {
         if (!activeChatId) return;
-        // notify_user: AI's message to the user — treat as response text
-        if (tc.toolName === 'notify_user' && tc.Message) {
-            const st = getChat(activeChatId);
-            if (st.responseText) st.responseText += '\n\n';
-            st.responseText += tc.Message;
-            scheduleEdit(activeChatId);
-            return;
-        }
+        // notify_user is already merged into response by core.js — skip here to avoid duplication
+        if (tc.toolName === 'notify_user') return;
         if (tc.toolName === 'run_command' && tc.SafeToAutoRun !== false && tc.CommandLine) {
             tgSendTemp(activeChatId, `⚙️ <code>${escapeHtml(tc.CommandLine)}</code>`, HTML).catch(() => { });
         } else if (tc.toolName && tc.toolName !== 'run_command') {

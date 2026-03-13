@@ -908,6 +908,24 @@ class Session extends EventEmitter {
         this._pendingToolCalls.clear();
     }
 
+    _mergeGrowingText(current, next) {
+        const a = String(current || '');
+        const b = String(next || '');
+        if (!b) return a;
+        if (!a) return b;
+        if (a === b) return a;
+        if (b.startsWith(a) || b.includes(a)) return b;
+        if (a.startsWith(b) || a.includes(b)) return a;
+        // Suffix-prefix overlap: if the end of `a` matches the start of `b`, merge without duplication
+        const maxOverlap = Math.min(a.length, b.length);
+        for (let len = maxOverlap; len >= 20; len--) {
+            if (a.endsWith(b.slice(0, len))) {
+                return a + b.slice(len);
+            }
+        }
+        return `${a}\n${b}`;
+    }
+
     _isRunningRunStatus(runStatus) {
         return !!runStatus && runStatus.includes('RUNNING');
     }
@@ -1426,17 +1444,21 @@ class Session extends EventEmitter {
             }
         }
 
-        // ── Collect ALL response text from steps after send point ──
-        // Combines plannerResponse + notifyUser from all steps into one string
+        // ── Collect response text from steps after send point ──
+        // Newer plannerResponse steps may contain a longer rewritten version of
+        // the same answer. Merge them by overlap instead of blindly appending,
+        // or the tail of the final answer can appear twice.
         let fullThinking = '';
         let fullResponse = '';
+        const notifyMessages = [];
+        const notifySeen = new Set();
         for (let si = this._pollSendStepCount; si < numSteps; si++) {
             const step = steps[si];
             if (step.plannerResponse) {
                 const t = step.plannerResponse.thinking || '';
                 const r = step.plannerResponse.modifiedResponse || step.plannerResponse.response || '';
-                if (t) fullThinking += (fullThinking ? '\n' : '') + t;
-                if (r) fullResponse += (fullResponse ? '\n' : '') + r;
+                if (t) fullThinking = this._mergeGrowingText(fullThinking, t);
+                if (r) fullResponse = this._mergeGrowingText(fullResponse, r);
             }
             if (step.notifyUser) {
                 // notificationContent is the primary field; argumentsJson.Message is fallback
@@ -1447,8 +1469,16 @@ class Session extends EventEmitter {
                 if (!msg && step.metadata?.toolCall?.argumentsJson) {
                     try { msg = JSON.parse(step.metadata.toolCall.argumentsJson).Message || ''; } catch {}
                 }
-                if (msg) fullResponse += (fullResponse ? '\n' : '') + msg;
+                if (msg && !notifySeen.has(msg)) {
+                    notifySeen.add(msg);
+                    notifyMessages.push(msg);
+                }
             }
+        }
+        if (notifyMessages.length > 0) {
+            fullResponse = fullResponse
+                ? `${fullResponse}\n\n${notifyMessages.join('\n\n')}`
+                : notifyMessages.join('\n\n');
         }
 
         if (fullThinking.length > this._pollLastThinkingLen) {
