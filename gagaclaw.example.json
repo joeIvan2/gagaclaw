@@ -10,7 +10,7 @@
     },
     "defaultInstance": "telegram-agent",
     "yoloMode": false,
-    "packetLog": false,
+    "packetLog": "enable",
     "defaults": {
         "model": "MODEL_PLACEHOLDER_M37",
         "mode": "planning",

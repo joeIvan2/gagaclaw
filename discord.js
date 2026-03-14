@@ -532,6 +532,10 @@ async function main() {
             sendMessage(state.channelId, `YOLO error: ${desc}`).catch(() => {});
         });
 
+        session.on('trajectoryStuck', () => {
+            sendMessage(state.channelId, `⚠️ Trajectory may be stuck (30s no new steps). Consider using /new.`).catch(() => {});
+        });
+
         session.on('newStep', () => {
             state.thinkingText = '';
             state.lastThinkingContent = '';

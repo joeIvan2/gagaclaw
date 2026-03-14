@@ -197,11 +197,14 @@ const _pktMode = (() => {
     return null; // disabled
 })();
 const _pktPath = path.join(__dirname, 'network-packets.log');
+const _pktOldPath = path.join(__dirname, 'network-packets.old.log');
+// Always clear packet logs on startup regardless of config
+try { fs.unlinkSync(_pktPath); } catch {}
+try { fs.unlinkSync(_pktOldPath); } catch {}
 const _pktMaxBytes = 5 * 1024 * 1024 * 1024; // 5 GB per file, ~10 GB total (current + old)
 let _pktBytesWritten = 0;
 let pktLog = _pktMode ? fs.createWriteStream(_pktPath, { flags: 'w' }) : null;
 
-const _pktOldPath = path.join(__dirname, 'network-packets.old.log');
 function _pktCheckRotate(bytes) {
     if (_pktMode !== 'enable') return;
     _pktBytesWritten += bytes;
@@ -239,7 +242,8 @@ if (pktLog) pktLog.write(`Session: ${new Date().toISOString()}\n${'═'.repeat(6
 function nodePost(port, pathName, body, csrfToken, host) {
     const url = `https://${host || '127.0.0.1'}:${port}/exa.language_server_pb.LanguageServerService/${pathName}`;
     const payload = JSON.stringify(body);
-    pktWriteBlock(`>>> POST ${pathName}`, payload);
+    const _isPollingReq = pathName === 'GetCascadeTrajectory';
+    if (_pktMode === 'full' || !_isPollingReq) pktWriteBlock(`>>> POST ${pathName}`, payload);
     return new Promise((resolve, reject) => {
         const req = https.request(url, {
             method: 'POST',
@@ -254,7 +258,7 @@ function nodePost(port, pathName, body, csrfToken, host) {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
-                pktWriteBlock(`<<< ${res.statusCode} ${pathName}`, data);
+                if (_pktMode === 'full' || !_isPollingReq) pktWriteBlock(`<<< ${res.statusCode} ${pathName}`, data);
                 resolve({ status: res.statusCode, body: data });
             });
         });
@@ -1018,12 +1022,14 @@ class Session extends EventEmitter {
             Array.isArray(update.mainTrajectoryUpdate?.stepsUpdate?.indices) &&
             update.mainTrajectoryUpdate.stepsUpdate.indices.length > 0;
 
-        pktWrite(
-            `AGENT_STATE status=${status} exec=${executableStatus} loop=${executorLoopStatus} ` +
-            `prev=${this._lastAgentStatus || ''} active=${this._agentStateTurnActive ? 1 : 0} steps=${hasStepUpdate ? 1 : 0}`
-        );
-
         const prevStatus = this._lastAgentStatus || '';
+        const stateChanged = status !== prevStatus || executableStatus !== this._lastAgentExecutableStatus || executorLoopStatus !== this._lastAgentExecutorLoopStatus;
+        if (_pktMode === 'full' || stateChanged) {
+            pktWrite(
+                `AGENT_STATE status=${status} exec=${executableStatus} loop=${executorLoopStatus} ` +
+                `prev=${prevStatus} active=${this._agentStateTurnActive ? 1 : 0} steps=${hasStepUpdate ? 1 : 0}`
+            );
+        }
         if (this._isRunningRunStatus(status)) {
             this._agentStateTurnActive = true;
         }
@@ -1381,13 +1387,41 @@ class Session extends EventEmitter {
             const data = JSON.parse(res.body);
             this._processPolledTrajectory(data);
         } catch (e) {
-            pktWrite(`POLL_ERROR: ${e.message}`);
+            pktWrite(`POLL_ERROR: ${e.message}\n${e.stack}`);
         }
     }
 
     _processPolledTrajectory(data) {
         const steps = data.trajectory?.steps || [];
         const numSteps = steps.length;
+        // Detect stuck trajectory: steps not changing while awaiting response
+        if (this._awaitingResponse && numSteps === this._pollLastNumSteps && numSteps <= this._pollSendStepCount) {
+            this._pollStaleCount = (this._pollStaleCount || 0) + 1;
+            // ~30s of no new steps (60 polls × 500ms) → likely stuck
+            if (this._pollStaleCount === 60) {
+                pktWrite(`TRAJECTORY_STUCK steps=${numSteps} send=${this._pollSendStepCount} stalePolls=${this._pollStaleCount}`);
+                this.emit('trajectoryStuck');
+            }
+        } else {
+            this._pollStaleCount = 0;
+        }
+
+        // Server may compact/truncate trajectory — adjust if our cursors exceed actual step count
+        if (this._pollSendStepCount > numSteps || this._pollLastNumSteps > numSteps) {
+            pktWrite(`TRAJECTORY_COMPACT sendStep=${this._pollSendStepCount}→${Math.min(this._pollSendStepCount, numSteps)} lastNum=${this._pollLastNumSteps}→${Math.min(this._pollLastNumSteps, numSteps)} actual=${numSteps}`);
+            if (this._pollSendStepCount > numSteps) this._pollSendStepCount = numSteps;
+            if (this._pollLastNumSteps > numSteps) this._pollLastNumSteps = numSteps;
+        }
+
+        // Log step summary when count changes
+        if (numSteps !== this._pollLastNumSteps) {
+            const summary = [];
+            for (let si = Math.max(0, this._pollSendStepCount); si < numSteps; si++) {
+                const s = steps[si];
+                summary.push(`${si}:${(s.type||'?').replace('CORTEX_STEP_TYPE_','')}/${(s.status||'?').replace('CORTEX_STEP_STATUS_','')}`);
+            }
+            pktWrite(`POLL_STEPS ${numSteps} send=${this._pollSendStepCount} await=${this._awaitingResponse?1:0} [${summary.join(' ')}]`);
+        }
 
         // Detect new steps
         if (numSteps > this._pollLastNumSteps) {
@@ -1410,6 +1444,10 @@ class Session extends EventEmitter {
             let hasWaiting = false;
             for (let si = this._pollSendStepCount; si < numSteps; si++) {
                 if ((steps[si].status || '').includes('WAITING')) { hasWaiting = true; break; }
+                // Also check subtrajectory steps
+                const sub = steps[si].subtrajectory || steps[si].subTrajectory;
+                if (sub?.steps) { for (const ss of sub.steps) { if ((ss.status || '').includes('WAITING')) { hasWaiting = true; break; } } }
+                if (hasWaiting) break;
             }
             if (!hasWaiting) return;
             pktWrite(`PERM_SCAN_OVERRIDE awaitingResponse=false but WAITING found, scanning anyway (sendStep=${this._pollSendStepCount} steps=${numSteps})`);
@@ -1419,14 +1457,27 @@ class Session extends EventEmitter {
         const waitingPermKeys = new Set();
 
         // ── Scan steps (after send point) for WAITING (permission needed) ──
+        // Also scan sub-agent steps (e.g. BROWSER_SUBAGENT contains nested steps)
+        const flatSteps = []; // { step, si, trajId, parentType }
         for (let si = this._pollSendStepCount; si < numSteps; si++) {
             const step = steps[si];
+            flatSteps.push({ step, si, trajId, parentType: null });
+            // Check for sub-agent nested steps (e.g. BROWSER_SUBAGENT has subtrajectory.steps)
+            const subTraj = step.subtrajectory || step.subTrajectory;
+            if (subTraj?.steps && Array.isArray(subTraj.steps)) {
+                const subTrajId = subTraj.trajectoryId || trajId;
+                for (let ssi = 0; ssi < subTraj.steps.length; ssi++) {
+                    flatSteps.push({ step: subTraj.steps[ssi], si: ssi, trajId: subTrajId, parentType: step.type });
+                }
+            }
+        }
+        for (const { step, si, trajId: permTrajId, parentType } of flatSteps) {
             const stepStatus = step.status || '';
             const stepType = step.type || '';
-            const permKey = this._permKey(trajId, si);
+            const permKey = this._permKey(permTrajId, si);
             if (!stepStatus.includes('WAITING')) {
                 if (this._pendingToolCalls.has(permKey)) {
-                    pktWrite(`PERM_CLEARED step=${si} type=${stepType} status=${stepStatus} (no longer WAITING)`);
+                    pktWrite(`PERM_CLEARED step=${si} type=${stepType} status=${stepStatus} (no longer WAITING)${parentType ? ` parent=${parentType}` : ''}`);
                 }
                 this._pollApprovedSteps.delete(permKey);
                 this._clearPendingPermissionByKey(permKey);
@@ -1439,6 +1490,7 @@ class Session extends EventEmitter {
             if (stepType.includes('RUN_COMMAND')) permType = 'run_command';
             else if (stepType.includes('MCP')) permType = 'mcp';
             else if (stepType.includes('CODE_ACTION') || stepType.includes('VIEW_FILE') || stepType.includes('CREATE_FILE') || stepType.includes('EDIT_FILE') || stepType.includes('LIST_DIR')) permType = 'file';
+            else if (stepType.includes('OPEN_BROWSER_URL') || stepType.includes('BROWSER')) permType = 'browser';
 
             const tc = step.metadata?.toolCall;
             let permPath = null, permCmd = null;
@@ -1460,7 +1512,7 @@ class Session extends EventEmitter {
                 contextTool: ctxTool,
                 permissionPath: permPath,
                 CommandLine: permCmd,
-                _trajectoryId: trajId,
+                _trajectoryId: permTrajId,
                 _stepIndex: si,
             };
             this._pendingToolCalls.set(permKey, perm);
@@ -1578,6 +1630,7 @@ class Session extends EventEmitter {
         this._pollSendStepCount = this._pollLastNumSteps;  // only look at steps AFTER this point
         this._pollApprovedSteps.clear();
         this._pollEmittedToolCalls.clear();
+        this._pollStaleCount = 0;
         this._clearAllPendingPermissions();
         this._lastAgentStatus = null;
         this._lastAgentExecutableStatus = null;

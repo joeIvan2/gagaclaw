@@ -472,6 +472,11 @@ async function main() {
         tgSend(activeChatId, `❌ YOLO 失敗: ${escapeHtml(desc)}`, HTML).catch(() => { });
     });
 
+    session.on('trajectoryStuck', () => {
+        if (!activeChatId) return;
+        tgSend(activeChatId, `⚠️ 軌跡可能卡住（30 秒無新步驟）。建議使用 /new 開新對話。`, HTML).catch(() => { });
+    });
+
     session.on('newStep', () => {
         if (!activeChatId) return;
         const st = getChat(activeChatId);
