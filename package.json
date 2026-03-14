@@ -1,6 +1,6 @@
 {
   "name": "gagaclaw",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "main": "telegram.js",
   "scripts": {
     "start:telegram": "node telegram.js telegram-agent",

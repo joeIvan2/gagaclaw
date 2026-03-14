@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.4.1 (2026-03-14)
+
+### New Features
+- **`packetLog` config toggle**: Network packet logging (`network-packets.log`) can now be disabled via `"packetLog": false` in `gagaclaw.json`. Defaults to off in example config to prevent multi-GB log files.
+
+### Bug Fixes
+- **Response text duplication**: `notify_user` messages were appended to response text twice — once by core.js (merged into response event) and again by telegram.js/discord.js toolCall handlers. Removed the duplicate accumulation in consumers.
+- **Telegram "message is not modified" fallback**: `tgEdit` now treats `message is not modified` as success, preventing the plain-text fallback from creating visual duplicates at turn end.
+- **Improved text merge overlap detection**: `_mergeGrowingText` now detects suffix-prefix overlaps (≥20 chars) between plannerResponse steps, reducing false concatenation.
+
 ## v1.4.0 (2026-03-13)
 
 ### New Features

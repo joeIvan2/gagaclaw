@@ -2,7 +2,7 @@
   <img src="gagaclaw_logo.png" alt="Gagaclaw" width="280">
 </p>
 
-<h1 align="center">Gagaclaw v1.4.0</h1>
+<h1 align="center">Gagaclaw v1.4.1</h1>
 
 > **The remote controller for your Antigravity.**
 
@@ -270,7 +270,7 @@ This project is licensed under the [MIT License](https://opensource.org/licenses
   <img src="gagaclaw_logo.png" alt="Gagaclaw" width="280">
 </p>
 
-<h1 align="center">Gagaclaw v1.4.0</h1>
+<h1 align="center">Gagaclaw v1.4.1</h1>
 
 > **The remote controller for your Antigravity.**
 > （你的專屬 Antigravity 遠端遙控器）
