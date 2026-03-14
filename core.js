@@ -189,10 +189,14 @@ function setConfigAgentic(val) {
 const tlsAgent = new https.Agent({ rejectUnauthorized: false });
 
 // ─── Packet logger ──────────────────────────────────────────────────────────
-const pktLog = fs.createWriteStream(path.join(__dirname, 'network-packets.log'), { flags: 'w' });
+const _pktEnabled = loadConfig().packetLog !== false;
+const pktLog = _pktEnabled
+    ? fs.createWriteStream(path.join(__dirname, 'network-packets.log'), { flags: 'w' })
+    : null;
 const ts = () => new Date().toISOString().slice(11, 23);
-function pktWrite(msg) { pktLog.write(`[${ts()}] ${msg}\n`); }
+function pktWrite(msg) { if (pktLog) pktLog.write(`[${ts()}] ${msg}\n`); }
 function pktWriteBlock(label, text) {
+    if (!pktLog) return;
     pktWrite(label);
     const body = String(text ?? '');
     if (!body) return;
@@ -200,7 +204,7 @@ function pktWriteBlock(label, text) {
         pktLog.write(`    ${line}\n`);
     }
 }
-pktLog.write(`Session: ${new Date().toISOString()}\n${'═'.repeat(60)}\n`);
+if (pktLog) pktLog.write(`Session: ${new Date().toISOString()}\n${'═'.repeat(60)}\n`);
 
 // ─── Node.js direct API calls ────────────────────────────────────────────────
 function nodePost(port, pathName, body, csrfToken, host) {
